@@ -7,6 +7,7 @@ public class SpawnSnakes : MonoBehaviour
     public Vector3 MinSpawnBounds;
     public Vector3 MaxSpawnBounds;
     public List<GameObject> Snakes;
+    public GameObject Camera;
 
     // Start is called before the first frame update
     void Start()
@@ -14,10 +15,10 @@ public class SpawnSnakes : MonoBehaviour
         float tempX = Random.Range(MinSpawnBounds.x, MaxSpawnBounds.x);
         float tempY = Random.Range(MinSpawnBounds.y, MaxSpawnBounds.y);
         float tempZ = Random.Range(MinSpawnBounds.z, MaxSpawnBounds.z);
-        Vector3 tempSpawn = new Vector3(tempX, tempY, tempZ);
+        Vector3 tempSpawn = Vector3.zero;//new Vector3(tempX, tempY, tempZ);
 
         GameObject snake = Instantiate(Resources.Load("Snake") as GameObject);
-        snake.GetComponent<GenerateSnake>().SpawnPoint = tempSpawn;
+        snake.GetComponent<SnakeController>().SpawnPoint = tempSpawn;
         Snakes.Add(snake);
     }
 
