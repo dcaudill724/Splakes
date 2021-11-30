@@ -15,20 +15,26 @@ public class CameraController : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+
+        GetComponent<Camera>().depthTextureMode |= DepthTextureMode.Depth;
+
         quaternionRotation = Quaternion.Euler(EulerRotation);
     }
 
     // Update is called once per frame
     void Update()
     {
-        //Rotate offset
-        Vector3 newOffset = SnakeObject.rotation * Offset;
+        if (SnakeObject != null)
+        {
+            //Rotate offset
+            Vector3 newOffset = SnakeObject.rotation * Offset;
 
-        //Rotate rotation
-        Quaternion newRotation = SnakeObject.rotation * quaternionRotation;
+            //Rotate rotation
+            Quaternion newRotation = SnakeObject.rotation * quaternionRotation;
 
-        transform.position = SnakeObject.position + newOffset;
-        transform.rotation = newRotation;
-
+            transform.position = SnakeObject.position + newOffset;
+            transform.rotation = newRotation;
+        }
+        
     }
 }

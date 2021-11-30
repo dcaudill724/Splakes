@@ -73,6 +73,100 @@ public static class Tools
         return new float[] { a, b, c, d };
     }
 
+    public static float GetDistancePointToPlane(Vector3 point, float[] planeEquation) {
+        float numerator = Mathf.Abs((planeEquation[0] * point.x) + (planeEquation[1] * point.y) + (planeEquation[2] * point.z) + planeEquation[3]);
+        float denominator = Mathf.Sqrt(Mathf.Pow(planeEquation[0], 2) + Mathf.Pow(planeEquation[1], 2) + Mathf.Pow(planeEquation[2], 2));
+        return numerator / denominator;
+    }
+
+    public static float GetSignedDistancePointToPlane(Vector3 point, float[] planeEquation)
+    {
+        float numerator = (planeEquation[0] * point.x) + (planeEquation[1] * point.y) + (planeEquation[2] * point.z) + planeEquation[3];
+        float denominator = Mathf.Sqrt(Mathf.Pow(planeEquation[0], 2) + Mathf.Pow(planeEquation[1], 2) + Mathf.Pow(planeEquation[2], 2));
+        return numerator / denominator;
+    }
+
+    public static Vector3 GetPlaneNormal(float[] planeEquation)
+    {
+        return new Vector3(planeEquation[0], planeEquation[1], planeEquation[2]).normalized;
+    }
+
+    public static Vector2[] Map3Dto2D(Vector3[] points, Vector3 normal)
+    {
+        //Assume points[0] is origin
+
+        //Get two orthoginal vectors on the plane
+        Vector3 vec1 = (points[1] - points[0]).normalized;
+        Vector3 vec2 = Vector3.Cross(vec1, normal).normalized;
+
+        Vector2[] newPoints = new Vector2[points.Length];
+        for (int i = 0; i < points.Length; ++i) {
+            newPoints[i] = new Vector2(Vector3.Dot(vec1, points[i] - points[0]), Vector3.Dot(vec2, points[i] - points[0]));
+        }
+
+        return newPoints;
+    }
+
+    public static float Map(float value, float r1start, float r1end, float r2start, float r2end)
+    {
+        return (value - r1start) / (r1end - r1start) * (r2end - r2start) + r2start;
+    }
+
+    public static bool LinesIntersect2D(Vector2 l1Start, Vector2 l1End, Vector2 l2Start, Vector2 l2End) 
+    {
+        Vector2 a = l1End - l1Start;
+        Vector2 b = l2Start - l2End;
+        Vector2 c = l1Start - l2Start;
+
+        float alphaNumerator = b.y * c.x - b.x * c.y;
+        float alphaDenominator = a.y * b.x - a.x * b.y;
+        float betaNumerator = a.x * c.y - a.y * c.x;
+        float betaDenominator = a.y * b.x - a.x * b.y;
+
+        bool doIntersect = true;
+
+        if (alphaDenominator == 0 || betaDenominator == 0)
+        {
+            doIntersect = false;
+        }
+        else
+        {
+
+            if (alphaDenominator > 0)
+            {
+                if (alphaNumerator < 0 || alphaNumerator > alphaDenominator)
+                {
+                    doIntersect = false;
+
+                }
+            }
+            else if (alphaNumerator > 0 || alphaNumerator < alphaDenominator)
+            {
+                doIntersect = false;
+            }
+
+            if (doIntersect && betaDenominator > 0) {
+                if (betaNumerator < 0 || betaNumerator > betaDenominator)
+                {
+                    doIntersect = false;
+                }
+            } else if (betaNumerator > 0 || betaNumerator < betaDenominator)
+            {
+                doIntersect = false;
+            }
+        }
+
+        return doIntersect;
+        /*float or1 = orientation(l1Start, l1End, l2Start);
+        float or2 = orientation(l1Start, l1End, l2End);
+        float or3 = orientation(l2Start, l2End, l1Start);
+        float or4 = orientation(l2Start, l2End, l1End);
+
+        if (or1 != or2 && or3 != or4) return true;
+
+        return false;*/
+    }
+
     public static float GetPointDistanceFromPlane(Vector3 point, Vector3 planeNormal, Vector3 pointOnPlane)
     {
         Vector3 n = planeNormal.normalized;
@@ -84,7 +178,7 @@ public static class Tools
     {
         Vector3 s1 = p1 - vertex;
         Vector3 s2 = p2 - vertex;
-        rAxis = Vector3.Cross(p1, p2).normalized;
+        rAxis = Vector3.Cross(s1, s2).normalized;
         float angle = Vector3.SignedAngle(s1, s2, rAxis);
         if (angle < 0)
         {
@@ -173,5 +267,41 @@ public static class Tools
         float verticalDistSq = dx2 * dx2 + dy2 * dy2;
 
         return Mathf.Sqrt(horizontalDistSq + verticalDistSq);
+    }
+
+    public static float pDistance(Vector2 p, Vector2 lstart, Vector2 lend) {
+
+        float A = p.x - lstart.x;
+        float B = p.y - lstart.y;
+        float C = lend.x - lstart.x;
+        float D = lend.y - lstart.y;
+
+        float dot = A * C + B * D;
+        float len_sq = C * C + D * D;
+        float param = -1;
+        if (len_sq != 0) //in case of 0 length line
+            param = dot / len_sq;
+
+        float xx, yy;
+
+        if (param < 0)
+        {
+            xx = lstart.x;
+            yy = lstart.y;
+        }
+        else if (param > 1)
+        {
+            xx = lend.x;
+            yy = lend.y;
+        }
+        else
+        {
+            xx = lstart.x + param * C;
+            yy = lstart.y + param * D;
+        }
+
+        float dx = p.x - xx;
+        float dy = p.y - yy;
+        return Mathf.Sqrt(dx * dx + dy * dy);
     }
 }
