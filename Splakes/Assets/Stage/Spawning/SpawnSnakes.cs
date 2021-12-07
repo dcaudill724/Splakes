@@ -1,23 +1,32 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
+using Photon.Realtime;
+using Photon.Pun;
 
 public class SpawnSnakes : MonoBehaviour
 {
     
     public Vector3 MinSpawnBounds;
     public Vector3 MaxSpawnBounds;
-    public int EnemyCount = 0;
+    public TextMeshProUGUI SnakeScoreText;
+    public TextMeshProUGUI SnakeLengthText;
+    public TextMeshProUGUI DebugText;
 
-    //All snakes on map
-    public List<GameObject> Snakes;
+    private SnakeController snake;
+    private Dictionary<Player, HollowSnakeController> hollowSnakes = new Dictionary<Player, HollowSnakeController>();
 
     //Snake Prefab
     public GameObject SnakePrefab;
+    public GameObject HollowSnakePrefab;
 
-
-    // Start is called before the first frame update
     void Start()
+    {
+
+    }
+
+    public void SpawnSnake(Player player)
     {
         float tempX = Random.Range(MinSpawnBounds.x, MaxSpawnBounds.x);
         float tempY = Random.Range(MinSpawnBounds.y, MaxSpawnBounds.y);
@@ -25,29 +34,72 @@ public class SpawnSnakes : MonoBehaviour
         Vector3 tempSpawn = new Vector3(tempX, tempY, tempZ);
 
         GameObject snake = Instantiate(SnakePrefab, new Vector3(0, 0, 0), Quaternion.identity);
-        snake.name = "Main Snake";
-        snake.GetComponent<SnakeController>().IsMainSnake = true;
+        snake.name = "Snake: " + player;
         snake.GetComponent<SnakeController>().SpawnPoint = tempSpawn;
-        Snakes.Add(snake);
-
-        for (int i = 0; i < EnemyCount; ++i)
-        {
-            tempX = Random.Range(MinSpawnBounds.x, MaxSpawnBounds.x);
-            tempY = Random.Range(MinSpawnBounds.y, MaxSpawnBounds.y);
-            tempZ = Random.Range(MinSpawnBounds.z, MaxSpawnBounds.z);
-            tempSpawn = new Vector3(tempX, tempY, tempZ);
-
-            GameObject enemySnake = Instantiate(SnakePrefab, new Vector3(0, 0, 0), Quaternion.identity);
-            enemySnake.name = "Enemy Snake: " + i;
-            snake.GetComponent<SnakeController>().IsMainSnake = true;
-            snake.GetComponent<SnakeController>().SpawnPoint = tempSpawn;
-            Snakes.Add(enemySnake);
-        }
+        snake.GetComponent<SnakeController>().SnakeScoreText = SnakeScoreText;
+        snake.GetComponent<SnakeController>().SnakeLengthText = SnakeLengthText;
+        this.snake = snake.GetComponent<SnakeController>();
     }
 
-    // Update is called once per frame
-    void Update()
+    public object[] GetSnakeBodyPositionData()
     {
+        Vector3[] positionData = snake.GetBodyPositionData();
+        object[] objPositionData = new object[positionData.Length];
+
+        for (int i = 0; i < positionData.Length; ++i)
+        {
+            objPositionData[i] = positionData[i] as object;
+        }
+
+        return objPositionData;
+    }
+
+    public object[] GetLaserWallMeshVerticies()
+    {
+        Vector3?[] vertexData = snake.GetLaserWallMeshVerticies();
+        object[] objVertexData = new object[vertexData.Length];
+
+        for (int i = 0; i < vertexData.Length; ++i)
+        {
+            objVertexData[i] = vertexData[i] as object;
+        }
+
+        return objVertexData;
+    }
+
+    public void GenerateHollowSnake(Vector3?[] snakePositionData, Vector3?[] laserWallMeshVerticies, Player player)
+    {
+        GameObject hollowSnake = Instantiate(HollowSnakePrefab, Vector3.zero, Quaternion.identity);
+        hollowSnake.GetComponent<HollowSnakeController>().InitHollowSnake(snakePositionData);
+        hollowSnakes.Add(player, hollowSnake.GetComponent<HollowSnakeController>());
+    }
+
+    public bool UpdateSnakeByPlayer(Player player, object[] objBodyPositions, object[] objLaserWallMeshVerticies)
+    {
+        Vector3?[] bodyPositions = new Vector3?[objBodyPositions.Length];
+        Vector3?[] laserWallMeshVerticies = new Vector3?[objLaserWallMeshVerticies.Length];
+        
+        for (int i = 0; i < objBodyPositions.Length; ++i)
+        {
+            bodyPositions[i] = objBodyPositions[i] as Vector3?;
+        }
+
+        for (int i = 0; i < objLaserWallMeshVerticies.Length; ++i)
+        {
+            laserWallMeshVerticies[i] = objLaserWallMeshVerticies[i] as Vector3?;
+        }
+
+
+        if (hollowSnakes.ContainsKey(player))
+        {
+            hollowSnakes[player].UpdateHollowSnake(bodyPositions, laserWallMeshVerticies);
+            return true;
+        }
+        else
+        {
+            GenerateHollowSnake(bodyPositions, laserWallMeshVerticies, player);
+            return false;
+        }
         
     }
 }

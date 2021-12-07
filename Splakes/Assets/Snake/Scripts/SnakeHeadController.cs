@@ -32,14 +32,17 @@ public class SnakeHeadController : MonoBehaviour
         this.scale = scale;
     }
 
-    private void OnCollisionEnter(Collision collision)
-    {
-        //Debug.Log(collision.transform.name + " : " + collision.contacts[0].point);
-    }
-
     private void OnCollisionExit(Collision collision)
     {
-        if (collision.transform.name == "StageBoundary") {
+        if (collision.transform.name == "StageBoundary" || collision.transform.name == "laser wall") {
+            transform.parent.gameObject.GetComponent<SnakeController>().Die();
+        }
+    }
+
+    private void OnCollisionEnter(Collision collision)
+    {
+        if (collision.transform.name == "laser wall")
+        {
             transform.parent.gameObject.GetComponent<SnakeController>().Die();
         }
     }

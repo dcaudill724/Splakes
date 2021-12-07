@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &9058324812109359631
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5761726936081210192}
+  - component: {fileID: 4980415228183811389}
+  m_Layer: 0
+  m_Name: HollowSnake
+  m_TagString: Snake
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5761726936081210192
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9058324812109359631}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4980415228183811389
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9058324812109359631}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a0989dc7e29d3b1469c40326472d5264, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SnakeHeadPrefab: {fileID: 4606781218588025701, guid: 51c37b684b61ad84eb3067907c50eb67,
+    type: 3}
+  SnakeBodyPrefab: {fileID: 6494835608232477208, guid: 3dc116fa55c77644a91321301e2f3697,
+    type: 3}
+  LaserWallMaterial: {fileID: 2100000, guid: 27b11ee01cb3d4647a0230f0e464fea1, type: 2}
+  Head: {fileID: 0}
+  Body: []
+  LaserWalls: []

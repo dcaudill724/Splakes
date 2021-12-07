@@ -45,14 +45,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   SpawnPoint: {x: 0, y: 0, z: 0}
   StartingLength: 20
-  Speed: 5
-  RotationSpeed: 100
+  Speed: 6
+  RotationSpeed: 115.09
   SnakeHead: {fileID: 4606781218588025701, guid: 51c37b684b61ad84eb3067907c50eb67,
     type: 3}
   StartHeadSize: 1.5
   StartBodySize: 1
   SnakeBodyMaterial: {fileID: 2100000, guid: 2ba9d149df21aa14f8fd9b65dd42a546, type: 2}
   LaserWallMaterial: {fileID: 2100000, guid: 27b11ee01cb3d4647a0230f0e464fea1, type: 2}
+  SnakeScoreText: {fileID: 0}
+  SnakeLengthText: {fileID: 0}
   Head: {fileID: 0}
   Body: []
   DirectionLaser: {fileID: 0}
@@ -73,7 +75,6 @@ MonoBehaviour:
   - {r: 0.3372549, g: 0.93333334, b: 0.95686275, a: 1}
   - {r: 0.92941177, g: 0.12941177, b: 0.4862745, a: 1}
   Camera: {fileID: 0}
-  IsMainSnake: 0
   Score: 0
   PointsForNewSegment: 10
   DyingAnimationLength: 1000

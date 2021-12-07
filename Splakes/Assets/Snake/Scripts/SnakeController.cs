@@ -1,10 +1,12 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
+using Photon.Pun;
+using Photon.Realtime;
 
 public class SnakeController : MonoBehaviour
 {
-
     #region Generation data
     public Vector3 SpawnPoint;
     public int StartingLength;
@@ -18,6 +20,8 @@ public class SnakeController : MonoBehaviour
     #region Visual data
     public Material SnakeBodyMaterial;
     public Material LaserWallMaterial;
+    public TextMeshProUGUI SnakeScoreText;
+    public TextMeshProUGUI SnakeLengthText;
     #endregion
 
     #region Body data
@@ -59,7 +63,6 @@ public class SnakeController : MonoBehaviour
 
     #region Camera data
     public Transform Camera;
-    public bool IsMainSnake;
     #endregion
 
     #region Gameplay data
@@ -94,6 +97,7 @@ public class SnakeController : MonoBehaviour
         initializeGameplayData();
         initializeMovementData();
         initializeCameraData();
+        initializeHud();
     }
 
     // Update is called once per frame
@@ -125,11 +129,56 @@ public class SnakeController : MonoBehaviour
 
     }
 
+    #region Multiplayer functions
+    public Vector3[] GetBodyPositionData()
+    {
+        Vector3[] positionData = new Vector3[Body.Length + 1];
+        positionData[0] = Head.transform.position;
+        for (int i = 0; i < Body.Length; ++i)
+        {
+            positionData[i + 1] = Body[i].transform.position;
+        }
+
+        return positionData;
+    }
+    
+    //Seperate different laser walls null
+    public Vector3?[] GetLaserWallMeshVerticies()
+    {
+        List<Vector3?> laserWallVerticies = new List<Vector3?>();
+
+        for (int i = 0; i < laserMeshes.Count; ++i)
+        {
+            laserWallVerticies.Add(null);
+
+            Mesh temp = laserMeshes[i].GetComponent<MeshFilter>().mesh;
+            for (int j = 0; j < temp.vertexCount; ++j)
+            {
+                laserWallVerticies.Add(temp.vertices[j]);
+            }
+        }
+
+        return laserWallVerticies.ToArray();
+    }
+
+    public Vector3 GetSnakeBodyColor()
+    {
+        return new Vector3(currentSnakeColor.r, currentSnakeColor.g, currentSnakeColor.b);
+    }
+
+    public Vector3 GetSnakeLaserColor()
+    {
+        return new Vector3(currentLaserWallColor.r, currentLaserWallColor.g, currentLaserWallColor.b);
+    }
+    #endregion
+
     #region Gameplay functions
     public void FeedSnake(int points)
     {
         Score += points;
+        SnakeScoreText.text = "Score: " + Score;
         updateSize(points);
+        SnakeLengthText.text = "Length: " + CurrentLength;
     }
 
     void updateSize(int points)
@@ -606,6 +655,12 @@ public class SnakeController : MonoBehaviour
     #endregion
 
     #region Initialization funtions
+    void initializeHud()
+    {
+        SnakeScoreText.text = "Score: 0";
+        SnakeLengthText.text = "Length: " + CurrentLength;
+    }
+
     void initializePositionData()
     {
         transform.position = SpawnPoint;
@@ -689,11 +744,8 @@ public class SnakeController : MonoBehaviour
 
     void initializeCameraData()
     {
-        if (IsMainSnake)
-        {
-            Camera = GameObject.Find("Main Camera").transform;
-            Camera.GetComponent<CameraController>().SnakeObject = transform;
-        }
+        Camera = GameObject.Find("Main Camera").transform;
+        Camera.GetComponent<CameraController>().SnakeObject = transform;
     }
     #endregion
 }
