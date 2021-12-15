@@ -16,7 +16,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &3370826954830146813
 Transform:
   m_ObjectHideFlags: 0
@@ -202,11 +202,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2f0622423fe013d4e8e97dac8f249019, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  Camera: {fileID: 0}
+  ParticleRenderDistance: 0
   FoodGenerator: {fileID: 0}
+  FoodBitPrefab: {fileID: 4090231933735401968, guid: 0791c0ccc09f5444eb4492688e0c6bd9,
+    type: 3}
+  SpawnedFromSnake: 0
+  ActiveDelay: 0.5
   PointValue: 10
+  Position: {x: 0, y: 0, z: 0}
   FoodColor: {r: 0, g: 0, b: 1, a: 1}
   ParticleEmissionRate: 0
-  EatSoundEffect: {fileID: 0}
 --- !u!198 &3370826956447013923
 ParticleSystem:
   m_ObjectHideFlags: 0
@@ -1035,7 +1041,7 @@ ParticleSystem:
           m_PostInfinity: 2
           m_RotationOrder: 4
   EmissionModule:
-    enabled: 1
+    enabled: 0
     serializedVersion: 4
     rateOverTime:
       serializedVersion: 2

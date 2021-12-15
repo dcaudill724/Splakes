@@ -107,6 +107,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   HeadTransform: {fileID: 0}
-  FoodPosition: {x: 0, y: 0, z: 0}
-  ExplosionForce: 0
-  ExplosionRadius: 0
+  SpawnExplosionForce: 0.3
+  SpawnExplosionDirection: {x: 0, y: 0, z: 0}
+  HeadGravity: 0.6
+  SpawnExplosionForceDampening: 0.01

@@ -1,105 +1,232 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using System;
 using UnityEngine;
 using TMPro;
 using Photon.Realtime;
 using Photon.Pun;
+using ExitGames.Client.Photon;
 
-public class SpawnSnakes : MonoBehaviour
+public enum SnakeEvents : byte
 {
-    
+    NeedSync = 1,
+    SnakeDied = 2,
+    SnakeHurt = 3,
+    SnakeRespawn = 4,
+    SnakeSegmentDied = 5,
+}
+
+public class SpawnSnakes : MonoBehaviourPunCallbacks, IOnEventCallback
+{
+    //Spawning parameters
     public Vector3 MinSpawnBounds;
     public Vector3 MaxSpawnBounds;
+
+    //Hud control parameters
     public TextMeshProUGUI SnakeScoreText;
     public TextMeshProUGUI SnakeLengthText;
-    public TextMeshProUGUI DebugText;
 
-    private SnakeController snake;
-    private Dictionary<Player, HollowSnakeController> hollowSnakes = new Dictionary<Player, HollowSnakeController>();
-
-    //Snake Prefab
+    //Prefabs
     public GameObject SnakePrefab;
     public GameObject HollowSnakePrefab;
 
+    //SnakeController control data
+    private GameObject snakeObject;
+    private SnakeController snake;
+    private List<SnakeController> otherSnakes;
+
     void Start()
     {
-
+        SpawnSnake(false);
     }
 
-    public void SpawnSnake(Player player)
+    void Update()
     {
-        float tempX = Random.Range(MinSpawnBounds.x, MaxSpawnBounds.x);
-        float tempY = Random.Range(MinSpawnBounds.y, MaxSpawnBounds.y);
-        float tempZ = Random.Range(MinSpawnBounds.z, MaxSpawnBounds.z);
+        
+    }
+
+
+    //Spawns the snake controlled by the current player
+    public void SpawnSnake(bool alreadySynced)
+    {
+        if (!alreadySynced)
+        {
+            //Initialize list of other players snakes
+            otherSnakes = new List<SnakeController>();
+        }
+
+        //Generate Random Spawn point
+        float tempX = UnityEngine.Random.Range(MinSpawnBounds.x, MaxSpawnBounds.x);
+        float tempY = UnityEngine.Random.Range(MinSpawnBounds.y, MaxSpawnBounds.y);
+        float tempZ = UnityEngine.Random.Range(MinSpawnBounds.z, MaxSpawnBounds.z);
         Vector3 tempSpawn = new Vector3(tempX, tempY, tempZ);
 
-        GameObject snake = Instantiate(SnakePrefab, new Vector3(0, 0, 0), Quaternion.identity);
-        snake.name = "Snake: " + player;
-        snake.GetComponent<SnakeController>().SpawnPoint = tempSpawn;
-        snake.GetComponent<SnakeController>().SnakeScoreText = SnakeScoreText;
-        snake.GetComponent<SnakeController>().SnakeLengthText = SnakeLengthText;
-        this.snake = snake.GetComponent<SnakeController>();
+        //Instantiate a snake at the random spawn point
+        GameObject snake = PhotonNetwork.Instantiate("Snake", tempSpawn, Quaternion.identity); //Gets instantiated on the network
+        snake.name = "Snake: " + PhotonNetwork.LocalPlayer.NickName;
+
+
+        //Store the local player snake object
+        snakeObject = snake;
+
+        //Initialize local players snake data
+        SnakeController sc = snake.GetComponent<SnakeController>();
+        sc.Owner = PhotonNetwork.LocalPlayer;
+        sc.SnakeScoreText = SnakeScoreText; //Hud Control
+        sc.SnakeLengthText = SnakeLengthText; //Hud Control
+        sc.SnakeSpawner = this; //Needs this to respawn snake on death
+
+        //Store the local player SnakeController        
+        this.snake = sc;
     }
 
-    public object[] GetSnakeBodyPositionData()
+    public void RespawnSnake()
     {
-        Vector3[] positionData = snake.GetBodyPositionData();
-        object[] objPositionData = new object[positionData.Length];
-
-        for (int i = 0; i < positionData.Length; ++i)
-        {
-            objPositionData[i] = positionData[i] as object;
-        }
-
-        return objPositionData;
+        PhotonNetwork.Destroy(snakeObject);
+        SpawnSnake(true);
     }
 
-    public object[] GetLaserWallMeshVerticies()
+
+    //Sync all snakes instantiated by other players with their snakes
+    void syncClientWithOtherOwners()
     {
-        Vector3?[] vertexData = snake.GetLaserWallMeshVerticies();
-        object[] objVertexData = new object[vertexData.Length];
-
-        for (int i = 0; i < vertexData.Length; ++i)
-        {
-            objVertexData[i] = vertexData[i] as object;
-        }
-
-        return objVertexData;
-    }
-
-    public void GenerateHollowSnake(Vector3?[] snakePositionData, Vector3?[] laserWallMeshVerticies, Player player)
-    {
-        GameObject hollowSnake = Instantiate(HollowSnakePrefab, Vector3.zero, Quaternion.identity);
-        hollowSnake.GetComponent<HollowSnakeController>().InitHollowSnake(snakePositionData);
-        hollowSnakes.Add(player, hollowSnake.GetComponent<HollowSnakeController>());
-    }
-
-    public bool UpdateSnakeByPlayer(Player player, object[] objBodyPositions, object[] objLaserWallMeshVerticies)
-    {
-        Vector3?[] bodyPositions = new Vector3?[objBodyPositions.Length];
-        Vector3?[] laserWallMeshVerticies = new Vector3?[objLaserWallMeshVerticies.Length];
         
-        for (int i = 0; i < objBodyPositions.Length; ++i)
+
+        GameObject[] allSnakes = GameObject.FindGameObjectsWithTag("Snake");
+        for (int i = 0; i < allSnakes.Length; ++i)
         {
-            bodyPositions[i] = objBodyPositions[i] as Vector3?;
+            SnakeController sc = allSnakes[i].GetComponent<SnakeController>();
+
+            if (sc != snake)
+            {
+                otherSnakes.Add(sc);
+                sc.RequestSyncWithOwner();
+            }
+        }
+    }
+
+    public int GetScore()
+    {
+        return snake.Score;
+    }
+
+
+    //Event handler
+    public void OnEvent(EventData photonEvent)
+    {
+        SnakeEvents snakeEvent;
+        Enum.TryParse(Enum.GetName(typeof(SnakeEvents), photonEvent.Code), out snakeEvent);
+
+        switch ((SnakeEvents)photonEvent.Code)
+        {
+            case SnakeEvents.SnakeDied: //Informs the client that the event sender has died
+                for (int i = 0; i < otherSnakes.Count; ++i)
+                {
+                    if (otherSnakes[i].Owner == PhotonNetwork.CurrentRoom.GetPlayer(photonEvent.Sender) && !otherSnakes[i].Dying)
+                    {
+                        otherSnakes[i].Die(false);
+                    }
+                } 
+                break;
+
+            case SnakeEvents.SnakeHurt: //Informs the client that the event sender has been hurt and what body segment was hurt.
+                Player sender = PhotonNetwork.CurrentRoom.GetPlayer(photonEvent.Sender);
+   
+                for (int i = 0; i < otherSnakes.Count; ++i)
+                {
+                    if (otherSnakes[i].Owner == sender)
+                    {
+                        otherSnakes[i].Hurt((int)photonEvent.CustomData);
+                    }
+                }
+                
+                break;
+        }
+    }
+
+
+    //Public event raisers for other classes
+    public void SnakeDied()
+    {
+        raiseSnakeEvent(SnakeEvents.SnakeDied);
+    }
+
+    public void SnakeHurt(int hurtStartIndex)
+    {
+        raiseSnakeEvent(SnakeEvents.SnakeHurt, hurtStartIndex);
+    }
+
+
+    //Add and remove snakes
+    public void AddSnake(SnakeController sc)
+    {
+        int listIndex = -1;
+
+        for (int i = 0; i < otherSnakes.Count; ++i)
+        {
+            if (otherSnakes[i].Owner == sc.Owner)
+            {
+                listIndex = i;
+            }
         }
 
-        for (int i = 0; i < objLaserWallMeshVerticies.Length; ++i)
+        //If the owner already had a snake then we replace it, otherwise we add it
+        if (listIndex >= 0)
         {
-            laserWallMeshVerticies[i] = objLaserWallMeshVerticies[i] as Vector3?;
-        }
-
-
-        if (hollowSnakes.ContainsKey(player))
-        {
-            hollowSnakes[player].UpdateHollowSnake(bodyPositions, laserWallMeshVerticies);
-            return true;
+            otherSnakes[listIndex] = sc;
         }
         else
         {
-            GenerateHollowSnake(bodyPositions, laserWallMeshVerticies, player);
-            return false;
+            otherSnakes.Add(sc);
         }
         
+    }
+
+    private void removeSnakeFromOthers(Player player)
+    {
+        SnakeController scToRemove = null;
+
+        for (int i = 0; i < otherSnakes.Count; ++i)
+        {
+            if (otherSnakes[i].Owner == player)
+            {
+                scToRemove = otherSnakes[i];
+            }
+        }
+
+        otherSnakes.Remove(scToRemove);
+    }
+
+
+    //Snake event raising functions
+    private void raiseSnakeEvent(SnakeEvents snakeEvent)
+    {
+        RaiseEventOptions reo = new RaiseEventOptions();
+
+        PhotonNetwork.RaiseEvent((byte)snakeEvent, null, reo, SendOptions.SendReliable);
+    }
+
+    private void raiseSnakeEvent(SnakeEvents snakeEvent, ReceiverGroup rg)
+    {
+        RaiseEventOptions reo = new RaiseEventOptions();
+        reo.Receivers = rg;
+
+        PhotonNetwork.RaiseEvent((byte)snakeEvent, null, reo, SendOptions.SendReliable);
+    }
+
+    private void raiseSnakeEvent(SnakeEvents snakeEvent, object eventContent)
+    {
+        RaiseEventOptions reo = new RaiseEventOptions();
+
+        PhotonNetwork.RaiseEvent((byte)snakeEvent, eventContent, reo, SendOptions.SendReliable);
+    }
+
+
+    //Room callbacks
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        base.OnPlayerLeftRoom(otherPlayer);
+
+        removeSnakeFromOthers(otherPlayer); //Remove the players snake from otherSnakes
     }
 }

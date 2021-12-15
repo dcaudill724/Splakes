@@ -51,6 +51,39 @@ MonoBehaviour:
   - RequestUpdatedSnakeData
   - EveryoneFoodEaten
   - MasterFoodEaten
+  - RequestSnakeColorData
+  - GetSnakeColorResponse
+  - LeaveGame
+  - AddPlayerToScoreList
+  - GetScoreResponse
+  - RequestScore
+  - LoadStageData
+  - SetInput
+  - setInput
+  - setPlayerToSyncWith
+  - syncPlayerWithOwner
+  - requestOwnerSync
+  - setOwner
+  - requestTotalSyncWithOwner
+  - syncNewSpawn
+  - affirmSync
+  - syncOurselvesWithOwner
+  - syncWithPlayer
+  - growClientFromOwner
+  - updateClientLaserMeshesFromOwner
+  - newFoodGenerated
+  - EveryoneFoodGeneratedFromSnakeEaten
+  - MasterFoodGeneratedFromSnakeEaten
+  - newFoodGeneratedFromSnake
+  - DestroyFood
+  - InformMasterFoodEaten
+  - SpawnNewFood
+  - addNewFood
+  - respondToClientWithFoodData
+  - destroyFood
+  - loadFood
+  - BodySegmentDied
+  - addSegment
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1

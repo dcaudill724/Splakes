@@ -3,193 +3,317 @@ using System.Collections.Generic;
 using UnityEngine;
 using Photon.Pun;
 
-public class GenerateFood : MonoBehaviourPun
+public class GenerateFood : MonoBehaviourPun, EventReceiver
 {
+    //Rendering optimization data
+    public Transform Camera;
+    public int ParticleRenderDistance;
+
+    //Generation data
+    public int FoodObjectsInPlay;
+
+    //Stage boundary data
     public Transform StageBoundary;
+    private GameObject foodContainer;
+
+    //Audio data
+    public AudioClip FoodEatenSoundEffect;
+
+    //Object storage
+    private List<GameObject> foodList;
+
+    //Visual data
     public Color[] FoodColors = new Color[0];
     public Vector2Int PointValueRange = new Vector2Int(2, 10);
     public Vector2 SizeRange = new Vector2(0.5f, 1.3f);
     public Vector2Int EmissionRateRange = new Vector2Int(2, 10);
-    public AudioClip FoodEatenSoundEffect;
 
-    public GameObject FoodBit;
+    //Food eaten data
     public float FoodEatenExplosionForce;
-    public int FoodObjectsInPlay;
 
-    public Dictionary<int, Vector3> FoodPositionsByID;
-    public Dictionary<int, int> FoodPointValuesByID;
-    public Dictionary<int, FoodController> FoodObjectsByID;
-    public Dictionary<FoodController, int> FoodIDsByObject;
-
-    //Prefab
+    //Prefabs
     public GameObject FoodPrefab;
-    private GameObject foodContainer;
+    public GameObject FoodBitPrefab;
+    
 
     void Start()
     {
-        InstantiateFoodContainer();
-    }
+        //Add to easy event system
+        EasyEventSystem.AddReceiver(this);
 
-    public void SpawnAllFood()
-    {
-        for (int i = 0; i < FoodObjectsInPlay; ++i)
+        //Storage initialization
+        foodList = new List<GameObject>();
+
+        //Initialize a parent object to all food objects for cleanliness and audio functions
+        foodContainer = new GameObject("Food Container");
+        foodContainer.transform.position = StageBoundary.position;
+        foodContainer.AddComponent<AudioSource>();
+        foodContainer.GetComponent<AudioSource>().volume = 0.05f;
+        foodContainer.AddComponent<FoodSoundController>().FoodEatenSoundEffect = FoodEatenSoundEffect;
+
+        if (PhotonNetwork.IsMasterClient)
         {
-            object[] foodData = generateNewFoodData();
-            Vector3 pos = (Vector3)foodData[0];
-            int pointValue = (int)foodData[1];
-            int foodID = (int)foodData[2];
-
-            FoodPositionsByID.Add(foodID, pos);
-            FoodPointValuesByID.Add(foodID, pointValue);
-
-            FoodController newFood = SpawnNewFood(pos, pointValue);
-            FoodObjectsByID.Add(foodID, newFood);
-            FoodIDsByObject.Add(newFood, foodID);
+            generateStageFood(); //Only the Master Client generates the stage
+        }
+        else
+        {
+            requestMasterFoodData(); //Other clients request food data from the master client
         }
     }
 
-    private object[] generateNewFoodData()
+    public void ReceiveEvent(string eventName, object content)
+    {
+        switch (eventName)
+        {
+            case "BodySegDied":
+                object[] conArray = (object[])content;
+
+                if (PhotonNetwork.LocalPlayer == PhotonNetwork.MasterClient)
+                {
+                    addNewFood(generateFoodDataArray(generateUniqueID(), (Vector3)conArray[0], (int)conArray[1]), true);
+                }
+                else
+                {
+                    photonView.RPC("addNewFood", RpcTarget.MasterClient, generateFoodDataArray(generateUniqueID(), (Vector3)conArray[0], (int)conArray[1]), true);
+                }
+                break;
+        }
+    }
+
+
+
+    private object[] generateFoodDataArray(int ID, Vector3 pos, int pointVal)
+    {
+        return new object[] { pos as object, pointVal as object, ID as object };
+    }
+
+    private GameObject spawnNewFood(int ID, Vector3 foodPosition, int foodPointValue, bool spawnedFromSnake)
+    {
+        //Instantiate new food object
+        GameObject food = Instantiate(FoodPrefab, new Vector3(0, 0, 0), Quaternion.identity);
+        FoodController fc = food.GetComponent<FoodController>();
+        food.transform.position = foodPosition;
+
+        //Set food object data
+        fc.FoodGenerator = this;
+        fc.PointValue = foodPointValue;
+        fc.SpawnedFromSnake = spawnedFromSnake;
+
+
+        //Set size based on point value
+        float tempScale = Tools.Map(foodPointValue, PointValueRange.x, PointValueRange.y, SizeRange.x, SizeRange.y);
+        food.transform.localScale = new Vector3(tempScale, tempScale, tempScale);
+
+        //Set emission rate based on point value
+        float tempEmissionRate = Tools.Map(foodPointValue, PointValueRange.x, PointValueRange.y, EmissionRateRange.x, EmissionRateRange.y);
+        fc.ParticleEmissionRate = tempEmissionRate;
+
+        //Set random color
+        fc.FoodColor = FoodColors[Random.Range(0, FoodColors.Length)];
+
+        //Add food object to the container
+        food.transform.SetParent(foodContainer.transform);
+
+        //Give food object 
+        fc.FoodBitPrefab = FoodBitPrefab;
+
+        //Set render optimization data
+        fc.Camera = Camera;
+        fc.ParticleRenderDistance = ParticleRenderDistance;
+
+        //Set ID
+        fc.ID = ID;
+
+        return food;
+    }
+
+    //Randomly generate new food object functions
+    private void generateStageFood()
+    {
+        for (int i = 0; i < FoodObjectsInPlay; ++i)
+        {
+            addNewFood(generateRandomFoodData());
+        }
+    }
+
+    private int generateUniqueID()
+    {
+        bool isUnique = false;
+        int randFoodID = Random.Range(0, 99999);
+
+        while (!isUnique)
+        {
+            bool containsID = false;
+
+            foreach (GameObject food in foodList)
+            {
+                if (food.GetComponent<FoodController>().ID == randFoodID)
+                {
+                    containsID = true;
+                    break;
+                }
+            }
+
+            if (!containsID)
+            {
+                isUnique = true;
+            }
+        }
+
+        return randFoodID;
+    }
+
+    private object[] generateRandomFoodData()
     {
         Vector3 unitPos = Random.insideUnitSphere;
         Vector3 truePos = unitPos * StageBoundary.localScale.x / 2;
 
         int tempPointValue = Random.Range(PointValueRange.x, PointValueRange.y + 1);
 
-        bool IDunique = false;
-        int randFoodID = Random.Range(0, 99999);
-        while (!IDunique)
-        {
-            if (!FoodObjectsByID.ContainsKey(randFoodID))
-            {
-                IDunique = true;
-            }
-            else
-            {
-                randFoodID = Random.Range(0, 99999);
-            }
-        }
+        int ID = generateUniqueID();
 
-        return new object[]{ truePos as object, tempPointValue as object, randFoodID as object };
+        return generateFoodDataArray(ID, truePos, tempPointValue);
     }
 
-    public int[] GetFoodIDs()
+
+    //Synchronized food generation/destruction functions
+    [PunRPC]
+    private void addNewFood(object[] newFoodData, bool spawnedFromSnake = false)
     {
-        int[] foodIDs = new int[FoodObjectsByID.Count];
-        FoodObjectsByID.Keys.CopyTo(foodIDs, 0);
+        //Parse food data
+        Vector3 pos = (Vector3)newFoodData[0];
+        int pointValue = (int)newFoodData[1];
+        int foodID = (int)newFoodData[2];
+
+        //Spawn the food
+        GameObject newFood = spawnNewFood(foodID, pos, pointValue, spawnedFromSnake);
+
+        foodList.Add(newFood);
+
+        //Only if called by the master, make other clients add the food as well
+        if (PhotonNetwork.LocalPlayer == PhotonNetwork.MasterClient)
+        {
+            photonView.RPC("addNewFood", RpcTarget.Others, newFoodData, spawnedFromSnake);
+        }
+
+    }
+
+    [PunRPC]
+    private void destroyFood(int ID)
+    {
+        GameObject foodToRemove = getFoodByID(ID).gameObject;
+
+        foodList.Remove(foodToRemove);
+        Destroy(foodToRemove);
+    }
+
+
+    //Food data initialization synchronization functions
+    private void requestMasterFoodData()
+    {
+        photonView.RPC("respondToClientWithFoodData", RpcTarget.MasterClient);
+    }
+
+    [PunRPC]
+    private void respondToClientWithFoodData(PhotonMessageInfo info)
+    {
+        int[] foodIDs = getFoodIDs(); //Get all the food ID's
+        photonView.RPC("loadFood", info.Sender, foodIDs, getFoodPositions(foodIDs), getFoodPointValues(foodIDs), getFoodSpawnedFromSnakes(foodIDs)); //Send food ID's and corresponding food data
+
+    }
+
+    [PunRPC]
+    private void loadFood(int[] foodIDs, Vector3[] foodPositions, int[] foodPointValues, bool[] spawnedFromSnakes)
+    {
+        for (int i = 0; i < foodIDs.Length; ++i)
+        {
+            addNewFood(generateFoodDataArray(foodIDs[i], foodPositions[i], foodPointValues[i]), spawnedFromSnakes[i]);
+        }
+    }
+
+
+    //Fetch food data functions
+    private int[] getFoodIDs()
+    {
+        int[] foodIDs = new int[foodList.Count];
+
+        for (int i = 0; i < foodList.Count; ++i)
+        {
+            foodIDs[i] = foodList[i].GetComponent<FoodController>().ID;
+        }
 
         return foodIDs;
     }
 
-    public Vector3[] GetFoodPositions(int[] foodIDs)
+    private Vector3[] getFoodPositions(int[] foodIDs)
     {
         Vector3[] foodPositions = new Vector3[foodIDs.Length];
 
         for (int i = 0; i < foodIDs.Length; ++i)
         {
-            foodPositions[i] = FoodPositionsByID[foodIDs[i]];
+            foodPositions[i] = getFoodByID(foodIDs[i]).transform.position;
         }
 
         return foodPositions;
     }
 
-    public int[] GetFoodPointValues(int[] foodIDs)
+    private int[] getFoodPointValues(int[] foodIDs)
     {
+
+        
         int[] foodPointValues = new int[foodIDs.Length];
+
 
         for (int i = 0; i < foodIDs.Length; ++i)
         {
-            foodPointValues[i] = FoodPointValuesByID[foodIDs[i]];
+            foodPointValues[i] = getFoodByID(foodIDs[i]).PointValue;
         }
 
         return foodPointValues;
     }
 
-    public void LoadFood(int[] foodIDs, Vector3[] foodPositions, int[] foodPointValues)
+    private bool[] getFoodSpawnedFromSnakes(int[] foodIDs)
     {
+        bool[] spawnedFromSnakes = new bool[foodIDs.Length];
+
         for (int i = 0; i < foodIDs.Length; ++i)
         {
-            FoodPositionsByID.Add(foodIDs[i], foodPositions[i]);
-            FoodPointValuesByID.Add(foodIDs[i], foodPointValues[i]);
-
-            FoodController newFood = SpawnNewFood(foodPositions[i], foodPointValues[i]);
-            FoodObjectsByID.Add(foodIDs[i], newFood);
-            FoodIDsByObject.Add(newFood, foodIDs[i]);
+            spawnedFromSnakes[i] = getFoodByID(foodIDs[i]).SpawnedFromSnake;
         }
+
+        return spawnedFromSnakes;
     }
 
-    private void InstantiateFoodContainer()
+
+    //Food eating functions
+    public void EatFood(int ID)
     {
-        FoodPositionsByID = new Dictionary<int, Vector3>();
-        FoodPointValuesByID = new Dictionary<int, int>();
-        FoodObjectsByID = new Dictionary<int, FoodController>();
-        FoodIDsByObject = new Dictionary<FoodController, int>();
-
-        foodContainer = new GameObject("Food Container");
-        foodContainer.transform.position = StageBoundary.position;
-        foodContainer.AddComponent<AudioSource>();
-        foodContainer.GetComponent<AudioSource>().volume = 0.05f;
-        foodContainer.AddComponent<FoodSoundController>().FoodEatenSoundEffect = FoodEatenSoundEffect;
-    }
-
-    public FoodController SpawnNewFood(Vector3 foodPosition, int foodPointValue)
-    {
-        GameObject food = Instantiate(FoodPrefab, new Vector3(0, 0, 0), Quaternion.identity);
-        food.GetComponent<FoodController>().FoodGenerator = this;
-
-        food.transform.position = foodPosition;
-
-        
-        food.GetComponent<FoodController>().PointValue = foodPointValue;
-
-        float tempScale = Tools.Map(foodPointValue, PointValueRange.x, PointValueRange.y, SizeRange.x, SizeRange.y);
-        food.transform.localScale = new Vector3(tempScale, tempScale, tempScale);
-
-        float tempEmissionRate = Tools.Map(foodPointValue, PointValueRange.x, PointValueRange.y, EmissionRateRange.x, EmissionRateRange.y);
-        food.GetComponent<FoodController>().ParticleEmissionRate = tempEmissionRate;
-
-        food.transform.GetComponent<FoodController>().FoodColor = FoodColors[Random.Range(0, FoodColors.Length)];
-
-        food.transform.SetParent(foodContainer.transform);
-
-        food.GetComponent<FoodController>().FoodBit = FoodBit;
-        food.GetComponent<FoodController>().FoodEatenExplosionForce = FoodEatenExplosionForce;
-
-        return food.GetComponent<FoodController>();
-    }
-
-    public void EatFood(FoodController fc)
-    {
-        int foodID = FoodIDsByObject[fc];
-        photonView.RPC("MasterFoodEaten", RpcTarget.MasterClient, foodID);
+        photonView.RPC("InformMasterFoodEaten", RpcTarget.MasterClient, ID);
     }
 
     [PunRPC]
-    public void MasterFoodEaten(int foodID)
+    private void InformMasterFoodEaten(int ID)
     {
-        object[] foodData = generateNewFoodData();
-        Vector3 newFoodPos = (Vector3)foodData[0];
-        int newFoodPointValue = (int)foodData[1];
-        int newFoodID = (int)foodData[2];
+        //Spawn a new food if the food was spawned naturally, not from a snake dying
+        if (!getFoodByID(ID).SpawnedFromSnake)
+        {
+            addNewFood(generateRandomFoodData());
+        }
 
-        photonView.RPC("EveryoneFoodEaten", RpcTarget.All, foodID, newFoodID, newFoodPos, newFoodPointValue);
+        //Destroy the food for all clients
+        photonView.RPC("destroyFood", RpcTarget.All, ID);
     }
 
-    [PunRPC]
-    public void EveryoneFoodEaten(int foodEatenID, int newFoodID, Vector3 newFoodPosition, int newFoodPointValue)
+    private FoodController getFoodByID(int ID)
     {
-        FoodController foodEaten = FoodObjectsByID[foodEatenID];
-        FoodIDsByObject.Remove(foodEaten);
+        foreach (GameObject food in foodList)
+        {
+            if (food.GetComponent<FoodController>().ID == ID)
+            {
+                return food.GetComponent<FoodController>();
+            }
+        }
 
-        Destroy(FoodObjectsByID[foodEatenID].gameObject);
-        FoodObjectsByID.Remove(foodEatenID);
-        FoodPointValuesByID.Remove(foodEatenID);
-        FoodPositionsByID.Remove(foodEatenID);
-
-        FoodPositionsByID.Add(newFoodID, newFoodPosition);
-        FoodPointValuesByID.Add(newFoodID, newFoodPointValue);
-
-        FoodController newFood = SpawnNewFood(newFoodPosition, newFoodPointValue);
-        FoodObjectsByID.Add(newFoodID, newFood);
-        FoodIDsByObject.Add(newFood, newFoodID);
+        return null;
     }
 }

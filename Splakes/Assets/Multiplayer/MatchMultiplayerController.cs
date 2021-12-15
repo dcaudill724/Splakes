@@ -3,129 +3,113 @@ using System.Collections.Generic;
 using UnityEngine;
 using Photon.Realtime;
 using Photon.Pun;
-using TMPro;
-using UnityEditor;
+using UnityEngine.SceneManagement;
 
-public class MatchMultiplayerController : MonoBehaviourPun
+public class MatchMultiplayerController : MonoBehaviourPunCallbacks
 {
+    //Debug logging
     public DebugLog DebugLog;
+
+    //Hud
+    public ScoreListContentController ScoreListContent;
+
+    //Level control objects
     public GenerateFood FoodGenerator;
     public SpawnSnakes SnakeSpawner;
-    public int UpdatesPerSecond = 60;
 
-    private float timeSinceLastUpdate = 0;
+    //Multiplayer request timing
+    private float updateTime = 0.5f;
+    private float timeSinceLastUpdate;
 
-    // Start is called before the first frame update
     void Start()
     {
-        PhotonNetwork.SendRate = UpdatesPerSecond;
-
-        if (PhotonNetwork.IsMasterClient)
+        
+        for (int i = 0; i < PhotonNetwork.PlayerList.Length; ++i)
         {
-            generateStage();
+            ScoreListContent.AddNewPlayer(PhotonNetwork.PlayerList[i]); //Add players in the game to the score list
         }
-        else
-        {
-            getStageData();
-        }
-
-        SpawnSnake(PhotonNetwork.LocalPlayer);
+        
     }
 
-
-    private void Update()
+    void Update()
     {
         timeSinceLastUpdate += Time.deltaTime;
 
-        if (timeSinceLastUpdate > 1 / UpdatesPerSecond)
+        if (timeSinceLastUpdate >= updateTime)
         {
-            requestAllSnakeData();
-            timeSinceLastUpdate -= 1 / UpdatesPerSecond;
+
+            //Put timed update requests in this region
+            //################################
+            RequestScores();
+            //################################
+
+            timeSinceLastUpdate -= updateTime;
         }
     }
 
-    #region Master Functions
-
-    #region Stage Functions
-    void generateStage()
+   
+    
+    
+    //Request the other players scores
+    public void RequestScores()
     {
-        DebugLog.ShowMessage("Generating Stage");
-        FoodGenerator.SpawnAllFood();
+        photonView.RPC("GetScoreResponse", RpcTarget.All, SnakeSpawner.GetScore());
     }
 
+    //Adds a new player to the score list
     [PunRPC]
-    public void RequestStageData(PhotonMessageInfo info)
+    public void AddPlayerToScoreList(int score, PhotonMessageInfo info)
     {
-        DebugLog.ShowMessage("Stage data request received from: " + info.Sender);
-        respondWithStageData(info.Sender);
-
+        ScoreListContent.AddExistingPlayer(info.Sender, score);
     }
 
-    private void respondWithStageData(Player requestSender)
-    {
-        DebugLog.ShowMessage("Responding with stage data");
-        int[] foodIDs = FoodGenerator.GetFoodIDs();
-
-        photonView.RPC("GetStageDataResponse", requestSender, foodIDs, FoodGenerator.GetFoodPositions(foodIDs), FoodGenerator.GetFoodPointValues(foodIDs));
-    }
-
-    #endregion
- 
-    #endregion
-
-    #region Guest Functions
-
-    #region Stage Functions
-    private void getStageData()
-    {
-        DebugLog.ShowMessage("Requesting stage data");
-        photonView.RPC("RequestStageData", RpcTarget.MasterClient);
-    }
-
+    //Update the senders score in the score list
     [PunRPC]
-    public void GetStageDataResponse(int[] foodIDs, Vector3[] foodPositions, int[] foodPointValues)
+    public void GetScoreResponse(int score, PhotonMessageInfo info)
     {
-        DebugLog.ShowMessage("Stage data received");
-        loadStageData(foodIDs, foodPositions, foodPointValues);
+        ScoreListContent.UpdatePlayer(info.Sender, score);
     }
 
-    private void loadStageData(int[] foodIDs, Vector3[] foodPositions, int[] foodPointValues)
+    //Leave the game and return to the main menu
+    [PunRPC]
+    public void LeaveGame()
     {
+        checkMasterClose();
+        PhotonNetwork.LeaveRoom();
+        SceneManager.LoadScene("MainMenu");
+    }
+
+    private void OnApplicationQuit()
+    {
+        checkMasterClose();
+        PhotonNetwork.Disconnect();
+    }
+
+    //Only runs if the master client leaves the game
+    void checkMasterClose()
+    {
+        if (PhotonNetwork.IsMasterClient)
+        {
+            PhotonNetwork.CurrentRoom.IsVisible = false; //If master leaves the room is no longer
+            photonView.RPC("LeaveGame", RpcTarget.Others); //Make all other players leave the game
+        }
+    }
+
+    public override void OnPlayerLeftRoom(Player otherPlayer)
+    {
+        base.OnPlayerLeftRoom(otherPlayer);
+
+        ScoreListContent.RemovePlayer(otherPlayer); //Remove the player from the score list
+    }
+    
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        base.OnPlayerEnteredRoom(newPlayer);
+
         DebugLog.ShowMessage("Loading Stage data");
-        FoodGenerator.LoadFood(foodIDs, foodPositions, foodPointValues);
-        DebugLog.ShowMessage("Stage data loaded");
+        
+
+        ScoreListContent.AddNewPlayer(newPlayer); //Add new player to the score list
     }
-    #endregion
-
-    #endregion
-
-    #region Everyone Functions
-
-    private void SpawnSnake(Player player)
-    {
-        SnakeSpawner.SpawnSnake(player);
-    }
-
-    private void requestAllSnakeData()
-    {
-        photonView.RPC("RequestSnakeData", RpcTarget.Others);
-    }
-
-    [PunRPC]
-    public void RequestSnakeData(PhotonMessageInfo info)
-    {
-        respondWithSnakeData(info.Sender);
-    }
-
-    private void respondWithSnakeData(Player requestSender)
-    {
-        photonView.RPC("GetSnakeDataResponse", requestSender, SnakeSpawner.GetSnakeBodyPositionData(), SnakeSpawner.GetLaserWallMeshVerticies());
-    }
-
-    [PunRPC]
-    public void GetSnakeDataResponse(object[] snakeBodyPoisitions, object[] laserWallMeshVerticies, PhotonMessageInfo info)
-    {
-        SnakeSpawner.UpdateSnakeByPlayer(info.Sender, snakeBodyPoisitions, laserWallMeshVerticies);
-    }
-    #endregion
+    
 }

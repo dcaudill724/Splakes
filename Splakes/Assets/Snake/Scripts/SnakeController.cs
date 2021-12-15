@@ -4,15 +4,19 @@ using UnityEngine;
 using TMPro;
 using Photon.Pun;
 using Photon.Realtime;
+using ExitGames.Client.Photon;
+using System;
+using TriangleNet.Geometry;
+using TriangleNet.Meshing;
+using TriangleNet.Topology;
+using TriangleNet;
 
-public class SnakeController : MonoBehaviour
+public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCallback
 {
     #region Generation data
-    public Vector3 SpawnPoint;
+
+    //Generation parameters
     public int StartingLength;
-    public float Speed;
-    public float RotationSpeed;
-    public GameObject SnakeHead;
     public float StartHeadSize;
     public float StartBodySize;
     #endregion
@@ -20,6 +24,12 @@ public class SnakeController : MonoBehaviour
     #region Visual data
     public Material SnakeBodyMaterial;
     public Material LaserWallMaterial;
+    public Color[] SnakeColors;
+    private Color currentSnakeColor;
+    public Color[] LaserWallColors;
+    private Color currentLaserWallColor;
+
+
     public TextMeshProUGUI SnakeScoreText;
     public TextMeshProUGUI SnakeLengthText;
     #endregion
@@ -29,146 +39,298 @@ public class SnakeController : MonoBehaviour
     [HideInInspector]
     public Transform Head;
     [HideInInspector]
-    public Transform[] Body; //Bruh, List<Transform> causes huge frame drops when adding body segments in generateBody. Therefore I sadly use array. Also is parallel with BodyMovement
-    [HideInInspector]
-    public Transform DirectionLaser;
+    public List<Transform> Body;
+
+    //Body data tracking
     [HideInInspector]
     public int CurrentLength;
 
-    public GameObject BodySegmentPrefab;
-    public int TurnThreshold;
-    public Color[] SnakeColors;
-    private Color currentSnakeColor;
-    public Color[] LaserWallColors;
-    private Color currentLaserWallColor;
-
-    private List<int> laserSegmentStartIndeces;
-    private List<int> laserSegmentEndIndeces;
+    //Laser wall data
+    private List<int> laserSegmentStartIndices;
+    private List<int> laserSegmentEndIndices;
     private List<GameObject> laserMeshes;
     #endregion
 
     #region Movement data
-    private bool updateMovementData;
-    private float movementDataUpdateTime;
+    //Movement parameters
+    public float Speed;
+    public float RotationSpeed;
+    public int TurnThreshold;
 
-    private float movementDistance;
-
-    private Vector3[] bodyRotationAxes;
-    private Vector3[] lastBodyPositions; //Parallel with Body and targetBodyPositions
-    private Vector3[] targetBodyPositions; //Parallel with Body and lasyBodyPositions
-    private Quaternion[] lastBodyRotations;
-    private Quaternion[] targetBodyRotations;
+    //Update timing
+    private float movementTargetUpdateRate;
     private float timeSinceLastTargetPosUpdate;
+
+    //Movement storage
+    private List<Vector3> bodyRotationAxes;
+    private List<Vector3> lastBodyPositions; //Parallel with Body and targetBodyPositions
+    private List<Vector3> targetBodyPositions; //Parallel with Body and lasyBodyPositions
+    private List<Quaternion> lastBodyRotations;
+    private List<Quaternion> targetBodyRotations;
+
+
     #endregion
 
     #region Camera data
+    //Main Camera data
     public Transform Camera;
     #endregion
 
     #region Gameplay data
+    //Score data
     public int Score;
+
+    //Growing parameters
     public int PointsForNewSegment;
 
+    //Grow control data
     private int scoreLastGrow;
     private float currentHeadSize;
     private float currentBodySize;
 
-    private bool dying = false;
-    public float DyingAnimationLength = 1000;
-    private float dyingAnimtionTimeLeft;
+    public float SegmentDeathStartDelay = 0.25f;
+    public float SegmentDeathLingerTime = 1f;
 
-    Vector3 LastRotationAxis;
+    [HideInInspector]
+    public bool Dying = false;
+
+    [HideInInspector]
+    public SpawnSnakes SnakeSpawner;
+    public GenerateFood FoodSpawner;
     #endregion
 
+    #region Multiplayer Data
+    //Owner data
+    public Player Owner;
+    #endregion
+
+    private GameObject[] midpointSpheres;
 
     // Start is called before the first frame update
     void Start()
     {
+        midpointSpheres = new GameObject[20];
+        for (int i = 0; i < 20; ++i)
+        {
+            midpointSpheres[i] = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            midpointSpheres[i].transform.localScale = new Vector3(0.3f, 0.3f, 0.3f);
+        }
+
+        //Get the food spawner
+        FoodSpawner = GameObject.Find("FoodGenerator").GetComponent<GenerateFood>();
+
+        //Initialize laser wall lists
         laserMeshes = new List<GameObject>();
-        laserSegmentStartIndeces = new List<int>();
-        laserSegmentEndIndeces = new List<int>();
+        laserSegmentStartIndices = new List<int>();
+        laserSegmentEndIndices = new List<int>();
 
-        currentSnakeColor = SnakeColors[Random.Range(0, SnakeColors.Length)];
-        currentLaserWallColor = LaserWallColors[Random.Range(0, LaserWallColors.Length)];
+        //Randomly select snake color
+        currentSnakeColor = SnakeColors[UnityEngine.Random.Range(0, SnakeColors.Length)];
+        currentLaserWallColor = LaserWallColors[UnityEngine.Random.Range(0, LaserWallColors.Length)];
 
-        generateHead();
-        initializePositionData();
-        generateBody();
-        initializeGameplayData();
-        initializeMovementData();
-        initializeCameraData();
-        initializeHud();
+        //Instantiate the body objects and body control structures
+        if (PhotonNetwork.LocalPlayer == Owner)
+        {
+            generateHead();
+            generateBody();
+            initializeGameplayData();
+            initializeMovementData();
+            initializeHud();
+            initializeCameraData();
+        }
+        else
+        {
+            RequestSyncWithOwner();
+        }
     }
 
     // Update is called once per frame
     void Update()
     {
-        if (!dying)
+        bool updateTargets = false;
+
+        //We dont want to update any targets if we are dying
+        if (!Dying)
         {
-            movementDataUpdateTime = currentBodySize / Speed; //Unit of time to measure when to update target body positions
-
+            //Update loop to run once the snake has moved the distance equivilent to the size of 1 body segment
             timeSinceLastTargetPosUpdate += Time.deltaTime;
-            if (timeSinceLastTargetPosUpdate >= currentBodySize / Speed) //If time to update target positions
+            if (timeSinceLastTargetPosUpdate >= 1 / Speed) //If time to update target positions
             {
-                updateMovementData = true;
-                timeSinceLastTargetPosUpdate -= movementDataUpdateTime; //Remove 1 unit of update time. I assume there will be a remainder to be accounted for
+                timeSinceLastTargetPosUpdate -= movementTargetUpdateRate;
 
-                UpdateLaserWalls();
+                updateTargets = true;
             }
 
-            moveHead();
-            moveBody();
-            DrawLaserWalls();
-            updateMovementData = false;
+            if (Owner == PhotonNetwork.LocalPlayer)
+            {
+                ownerUpdate(updateTargets);
+            }
+            else
+            {
+                nonOwnerUpdate();
+            }
         }
         else
         {
-            updateDieAnimation();
-        }
-        
+            if (Owner == PhotonNetwork.LocalPlayer)
+            {
+                bool doneDying = true;
 
+                if (Head != null)
+                {
+                    doneDying = false;
+                }
+
+                for (int i = 0; i < Body.Count; ++i)
+                {
+                    if (Body[i] != null)
+                    {
+                        doneDying = false;
+                    }
+                }
+
+                if (doneDying)
+                {
+                    SnakeSpawner.RespawnSnake();
+                }
+            }
+        }
+    }
+
+
+
+    private void ownerUpdate(bool updateTargets)
+    {
+        if (updateTargets)
+        {
+            updateBodyTargets();
+            UpdateLaserWalls(); //Only owner finds new laser walls
+            updateOtherClientsLaserMeshes(); //Send new laser wall data to other clients
+        }
+
+        moveHead();
+        moveBody();
+        generateLaserMeshes();
+    }
+
+    private void nonOwnerUpdate()
+    {
+        if (Body.Count > 0)
+        {
+            generateLaserMeshes();
+        }
     }
 
     #region Multiplayer functions
-    public Vector3[] GetBodyPositionData()
+    public void OnPhotonInstantiate(PhotonMessageInfo info)
     {
-        Vector3[] positionData = new Vector3[Body.Length + 1];
-        positionData[0] = Head.transform.position;
-        for (int i = 0; i < Body.Length; ++i)
+        Owner = info.Sender;
+
+        //Add all snakes not instantiated by the local client to the SnakeSpawner list of snakes
+        if (Owner != PhotonNetwork.LocalPlayer)
         {
-            positionData[i + 1] = Body[i].transform.position;
+            SnakeSpawner = GameObject.Find("SnakeSpawner").GetComponent<SpawnSnakes>();
+            SnakeSpawner.AddSnake(this);
+        }
+    }
+
+
+    //Synchronization functions
+    public void RequestSyncWithOwner()
+    {
+        photonView.RPC("syncWithPlayer", Owner);
+    }
+
+    //Send snake data from the Owner client to the client requesting synchronization
+    [PunRPC]
+    private void syncWithPlayer(PhotonMessageInfo info)
+    {
+        object[] syncList = new object[Body.Count + 3];
+
+        syncList[0] = getSnakeBodyColor();
+        syncList[1] = getSnakeLaserColor();
+        syncList[2] = Head.GetComponent<PhotonView>().ViewID;
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            syncList[i + 3] = Body[i].GetComponent<PhotonView>().ViewID;
         }
 
-        return positionData;
+
+        photonView.RPC("syncOurselvesWithOwner", info.Sender, (object)syncList);
     }
-    
-    //Seperate different laser walls null
-    public Vector3?[] GetLaserWallMeshVerticies()
+
+    //Recieve Owner client snake infomation and sync local client belonging to the Owner with it.
+    [PunRPC]
+    private void syncOurselvesWithOwner(object syncList, PhotonMessageInfo info)
     {
-        List<Vector3?> laserWallVerticies = new List<Vector3?>();
+        object[] syncListArray = (object[])syncList;
 
-        for (int i = 0; i < laserMeshes.Count; ++i)
+        if (info.Sender == Owner)
         {
-            laserWallVerticies.Add(null);
+            
+            Head = PhotonView.Find((int)syncListArray[2]).transform;
 
-            Mesh temp = laserMeshes[i].GetComponent<MeshFilter>().mesh;
-            for (int j = 0; j < temp.vertexCount; ++j)
+            CurrentLength = 0;
+            for (int i = 3; i < syncListArray.Length; ++i)
             {
-                laserWallVerticies.Add(temp.vertices[j]);
+                Body.Add(PhotonView.Find((int)syncListArray[i]).transform);
+                CurrentLength += 1;
             }
+            
+            syncSnakeColors((Vector3)syncListArray[0], (Vector3)syncListArray[1]);
         }
-
-        return laserWallVerticies.ToArray();
     }
 
-    public Vector3 GetSnakeBodyColor()
+    void syncSnakeColors(Vector3 bodyColor, Vector3 laserColor)
+    {
+        currentSnakeColor = new Color(bodyColor.x, bodyColor.y, bodyColor.z);
+
+        Head.GetComponent<Renderer>().material.color = currentSnakeColor;
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            Body[i].GetComponent<Renderer>().material.color = currentSnakeColor;
+        }
+
+
+        currentLaserWallColor = new Color(laserColor.x, laserColor.y, laserColor.z);
+    }
+
+
+
+    //Body data fetching
+    private Vector3 getSnakeBodyColor()
     {
         return new Vector3(currentSnakeColor.r, currentSnakeColor.g, currentSnakeColor.b);
     }
 
-    public Vector3 GetSnakeLaserColor()
+    private Vector3 getSnakeLaserColor()
     {
         return new Vector3(currentLaserWallColor.r, currentLaserWallColor.g, currentLaserWallColor.b);
+    }
+
+
+    //Owner to client realtime synchronization functions
+    private void updateOtherClientsLaserMeshes()
+    {
+        object laserMeshSyncList = new object[]
+        {
+            laserSegmentStartIndices.ToArray(),
+            laserSegmentEndIndices.ToArray()
+        };
+
+        photonView.RPC("updateClientLaserMeshesFromOwner", RpcTarget.Others, laserMeshSyncList);
+    }
+
+    [PunRPC]
+    private void updateClientLaserMeshesFromOwner(object laserMeshSyncList)
+    {
+        object[] objArray = (object[])laserMeshSyncList;
+
+        laserSegmentStartIndices = new List<int>();
+        laserSegmentStartIndices.AddRange((int[])objArray[0]);
+
+        laserSegmentEndIndices = new List<int>();
+        laserSegmentEndIndices.AddRange((int[])objArray[1]);
     }
     #endregion
 
@@ -176,80 +338,84 @@ public class SnakeController : MonoBehaviour
     public void FeedSnake(int points)
     {
         Score += points;
-        SnakeScoreText.text = "Score: " + Score;
-        updateSize(points);
-        SnakeLengthText.text = "Length: " + CurrentLength;
+        updateSize();
+        updateHUD();
     }
 
-    void updateSize(int points)
+    private void updateHUD()
+    {
+        if (Owner == PhotonNetwork.LocalPlayer)
+        {
+            SnakeScoreText.text = "Score: " + Score;
+            SnakeLengthText.text = "Length: " + CurrentLength;
+        }
+    }
+
+
+    private void updateSize()
     {
         //Add new segment if condition is met
         if (Score - scoreLastGrow >= PointsForNewSegment)
         {
-            int newSegments = (Score - scoreLastGrow) / PointsForNewSegment;
-
-
-            //Make new body arrays. Also look at how these badboys slope, looks very nice
-            Transform[] newBody = new Transform[Body.Length + newSegments];
-            Vector3[] newBodyRotationAxes = new Vector3[bodyRotationAxes.Length + newSegments];
-            Vector3[] newLastBodyPositions = new Vector3[lastBodyPositions.Length + newSegments];
-            Vector3[] newTargetBodyPositions = new Vector3[targetBodyPositions.Length + newSegments]; 
-            Quaternion[] newLastBodyRotations = new Quaternion[lastBodyRotations.Length + newSegments];
-            Quaternion[] newTargetBodyRotations = new Quaternion[targetBodyRotations.Length + newSegments];
-
-            //Copy old arrays to new arrays
-            for (int i = 0; i < CurrentLength; ++i)
-            {
-                newBody[i] = Body[i];
-                newBodyRotationAxes[i] = bodyRotationAxes[i];
-                newLastBodyPositions[i] = lastBodyPositions[i];
-                newTargetBodyPositions[i] = targetBodyPositions[i];
-                newLastBodyRotations[i] = lastBodyRotations[i];
-                newTargetBodyRotations[i] = targetBodyRotations[i];
-            }
-
-            for (int i = 0; i < newSegments; ++i)
-            {
-                newBody[i + CurrentLength] = Instantiate(BodySegmentPrefab).transform;
-                newBody[i + CurrentLength].SetParent(transform);
-                newBody[i + CurrentLength].GetComponent<Renderer>().material.color = currentSnakeColor;
-                newBody[i + CurrentLength].position = newBody[(i + CurrentLength) - 1].position + newBody[(i + CurrentLength) - 1].TransformDirection(-Vector3.forward) * currentBodySize;
-
-                newBodyRotationAxes[i + CurrentLength] = bodyRotationAxes[(i + CurrentLength) - 1];
-                newLastBodyPositions[i + CurrentLength] = lastBodyPositions[(i + CurrentLength) - 1];
-                newTargetBodyPositions[i + CurrentLength] = targetBodyPositions[(i + CurrentLength) - 1];
-                newLastBodyRotations[i + CurrentLength] = lastBodyRotations[(i + CurrentLength) - 1];
-                newTargetBodyRotations[i + CurrentLength] = targetBodyRotations[(i + CurrentLength) - 1];
-            }
-
-            //Set arrays to new arrays
-            Body = newBody;
-            bodyRotationAxes = newBodyRotationAxes;
-            lastBodyPositions = newLastBodyPositions;
-            targetBodyPositions = newTargetBodyPositions;
-            lastBodyRotations = newLastBodyRotations;
-            targetBodyRotations = newTargetBodyRotations;
-
-            CurrentLength += newSegments;
+            growNewSegment();
 
             //Update condition data
             scoreLastGrow = Score;
         }
-
-        //Change head size
-        Head.localScale = new Vector3(currentHeadSize, currentHeadSize, currentHeadSize);
-
-        //Change body segment size
-        for (int i = 0; i < Body.Length; ++i)
-        {
-            Body[i].localScale = new Vector3(currentBodySize, currentBodySize, currentBodySize);
-        }
     }
 
-    void UpdateLaserWalls()
+    private void growNewSegment()
     {
-        laserSegmentStartIndeces = new List<int>(); //Holds the Body index of laser segment start
-        laserSegmentEndIndeces = new List<int>(); //Holds the Body index of laser segment end
+        //Initialize new segment
+        Transform newSegment = PhotonNetwork.Instantiate("SnakeBodySeg", Body[CurrentLength - 1].position + Body[CurrentLength - 1].TransformDirection(-Vector3.forward) * currentBodySize, Quaternion.identity).transform;
+        newSegment.GetComponent<Renderer>().material.color = currentSnakeColor;
+        newSegment.GetComponent<SnakeBodyController>().Init(Owner, this, true);
+
+        //Resize all arrays and and new segment data
+        Body.Add(newSegment);
+        bodyRotationAxes.Add(bodyRotationAxes[CurrentLength - 1]);
+        lastBodyPositions.Add(lastBodyPositions[CurrentLength - 1]);
+        targetBodyPositions.Add(targetBodyPositions[CurrentLength - 1]);
+        lastBodyRotations.Add(lastBodyRotations[CurrentLength - 1]);
+        targetBodyRotations.Add(targetBodyRotations[CurrentLength - 1]);
+
+        //Increase the current length by one
+        CurrentLength += 1;
+
+        photonView.RPC("addSegment", RpcTarget.Others, newSegment.GetComponent<PhotonView>().ViewID);
+    }
+
+    [PunRPC]
+    private void addSegment(int newSegViewID)
+    {
+        Transform newSegment = PhotonView.Find(newSegViewID).transform;
+        newSegment.GetComponent<Renderer>().material.color = currentSnakeColor;
+        newSegment.GetComponent<SnakeBodyController>().Init(Owner, this, true);
+        Body.Add(newSegment);
+        CurrentLength += 1;
+    }
+
+    private void removeSegment(int segmentIndex)
+    {
+        Body.RemoveAt(segmentIndex);
+
+        if (PhotonNetwork.LocalPlayer == Owner)
+        {
+            bodyRotationAxes.RemoveAt(segmentIndex);
+            lastBodyPositions.RemoveAt(segmentIndex);
+            targetBodyPositions.RemoveAt(segmentIndex);
+            lastBodyRotations.RemoveAt(segmentIndex);
+            targetBodyRotations.RemoveAt(segmentIndex);
+        }
+
+        CurrentLength -= 1;
+        Score -= PointsForNewSegment;
+    }
+
+    private void UpdateLaserWalls()
+    {
+        laserSegmentStartIndices = new List<int>(); //Holds the Body index of laser segment start
+        laserSegmentEndIndices = new List<int>(); //Holds the Body index of laser segment end
 
         int startIndex = -1; //start at head which is basically Body[-1]
         bool firstLaserSegmentValid = false;
@@ -258,8 +424,8 @@ public class SnakeController : MonoBehaviour
 
         if (firstLaserSegmentValid) //If a valid first segment is even found
         {
-            laserSegmentStartIndeces.Add(startIndex); //Add the start index
-            laserSegmentEndIndeces.Add(firstLaserSegEndIndex); //Add the end index
+            laserSegmentStartIndices.Add(startIndex); //Add the start index
+            laserSegmentEndIndices.Add(firstLaserSegEndIndex); //Add the end index
 
             if (!endOfFirstSegmentIsTail) //If we havent already reached the tail we will need to find more
             {
@@ -286,8 +452,8 @@ public class SnakeController : MonoBehaviour
                             {
                                 if (bestSegmentEndIndex > lastSegmentEndIndex)
                                 {
-                                    laserSegmentStartIndeces.Add(bestSegmentStartIndex); //Add the start index
-                                    laserSegmentEndIndeces.Add(bestSegmentEndIndex); //Add the end index
+                                    laserSegmentStartIndices.Add(bestSegmentStartIndex); //Add the start index
+                                    laserSegmentEndIndices.Add(bestSegmentEndIndex); //Add the end index
                                     lastSegmentEndIndex = bestSegmentEndIndex;
                                     bestSegmentEndIndex = 0;
                                     bestSegmentLength = 0;
@@ -312,8 +478,8 @@ public class SnakeController : MonoBehaviour
                         {
                             if (currentEndIndex > lastSegmentEndIndex)
                             {
-                                laserSegmentStartIndeces.Add(currentStartIndex); //Add the start index
-                                laserSegmentEndIndeces.Add(currentEndIndex); //Add the end index
+                                laserSegmentStartIndices.Add(currentStartIndex); //Add the start index
+                                laserSegmentEndIndices.Add(currentEndIndex); //Add the end index
                                 lastSegmentEndIndex = currentEndIndex;
                                 searchingInLastSegment = true;
                             }
@@ -350,7 +516,7 @@ public class SnakeController : MonoBehaviour
                 return laserSegEndIndex;
             }
 
-            if (laserSegEndIndex == Body.Length - 1)
+            if (laserSegEndIndex == Body.Count - 1)
             {
                 searchingForFirstSegment = false; //Done searching
                 endOfSegmentIsTail = true; //The end of of the segment is the tail
@@ -359,37 +525,6 @@ public class SnakeController : MonoBehaviour
         }
 
         return -1;
-    }
-
-    void DrawLaserWalls()
-    {
-        /*Head.GetComponent<Renderer>().material.color = Color.grey;
-        for (int i = 0; i < Body.Length; ++i)
-        {
-            //Debug.DrawRay(Body[i].position, transform.position - Body[i].position, Color.blue);
-            //Body[i].GetComponent<Renderer>().material.color = Color.grey;
-            for (int j = 0; j < Body.Length; ++j)
-            {
-                //Debug.DrawRay(Body[i].position, Body[j].position - Body[i].position, Color.green);
-                
-            }
-        }*/
-
-        generateLaserMeshses(laserSegmentStartIndeces, laserSegmentEndIndeces);
-
-        /*for (int i = 0; i < laserSegmentStartIndeces.Count; ++i)
-        {
-            if (laserSegmentStartIndeces[i] == -1)
-            {
-                Head.GetComponent<Renderer>().material.color = Color.green;
-            }
-            else
-            {
-                Body[laserSegmentStartIndeces[i]].GetComponent<Renderer>().material.color = Color.green;
-            }
-            Body[laserSegmentEndIndeces[i]].GetComponent<Renderer>().material.color = Color.red;
-        }
-        */
     }
 
     int findLaserSegEndIndex(int segStartIndex)
@@ -410,7 +545,7 @@ public class SnakeController : MonoBehaviour
 
         int segIndex = segStartIndex + 1;
         bool foundPlane = false;
-        int pointAtPlaneEndIndex = Body.Length - 1;
+        int pointAtPlaneEndIndex = Body.Count - 1;
         float[] planeEquation = Tools.GetPlaneFrom3Points(segStart.position, Body[segIndex].position, Body[pointAtPlaneEndIndex].position);
 
         do
@@ -422,7 +557,7 @@ public class SnakeController : MonoBehaviour
                 for (int i = segStartIndex + 2; i < pointAtPlaneEndIndex; ++i)
                 {
                     Vector3 pointToTest = Body[i].position;
-                    if (Tools.GetDistancePointToPlane(pointToTest, planeEquation) > 0.6)
+                    if (Tools.GetDistancePointToPlane(pointToTest, planeEquation) > 0.3)
                     {
                         allPointsPassed = false; //Point is not part of the plane
                         i = pointAtPlaneEndIndex;//To break the loop
@@ -444,14 +579,14 @@ public class SnakeController : MonoBehaviour
         } while (!foundPlane);
         pointAtPlaneEndIndex += 1;//Add 1 to account for the last decrement in the do-while loop
 
-        //Debug.Log(pointAtPlaneEndIndex);
 
        for (int i = pointAtPlaneEndIndex; i >= segIndex; --i)
         {
             RaycastHit hit;
             if (Physics.Raycast(segStart.position, Body[i].position - segStart.position, out hit, 1000, LayerMask.GetMask("RaycastTargetLayer"))){
                 
-                if (System.Array.IndexOf(Body, hit.collider.transform.parent) == i)
+                
+                if (Body.IndexOf(hit.collider.transform.parent) == i)
                 {
                     return i;
                 }
@@ -460,10 +595,10 @@ public class SnakeController : MonoBehaviour
         return segIndex;
     }
 
-    void generateLaserMeshses(List<int> laserSegmentStartIndeces, List<int> laserSegmentEndIndeces)
+    void generateLaserMeshes()
     {
         //Only add or remove laser meshes when the number of meshes change
-        int laserMeshesSegmentsDifference = laserMeshes.Count - laserSegmentStartIndeces.Count;
+        int laserMeshesSegmentsDifference = laserMeshes.Count - laserSegmentStartIndices.Count;
         if (laserMeshesSegmentsDifference > 0) //If we have more meshes than lasers
         {
             for (int i = 0; i < laserMeshesSegmentsDifference; ++i)
@@ -482,10 +617,14 @@ public class SnakeController : MonoBehaviour
                 laserMesh.AddComponent<MeshFilter>();
                 laserMesh.AddComponent<MeshRenderer>();
                 laserMesh.AddComponent<LaserWallController>();
-                laserMesh.transform.SetParent(transform);
 
                 laserMesh.GetComponent<MeshRenderer>().material = LaserWallMaterial;
                 laserMesh.GetComponent<Renderer>().material.SetColor("_AlbedoColor", currentLaserWallColor);
+
+                if (Owner != PhotonNetwork.LocalPlayer)
+                {
+                    laserMesh.AddComponent<MeshCollider>();
+                }
 
                 laserMeshes.Add(laserMesh);
             }
@@ -495,16 +634,22 @@ public class SnakeController : MonoBehaviour
 
         for (int i = 0; i < laserMeshes.Count; ++i)
         {
-            Mesh mesh = new Mesh();
+            laserMeshes[i].SetActive(true);
+
+            UnityEngine.Mesh mesh = new UnityEngine.Mesh();
             laserMeshes[i].GetComponent<MeshFilter>().mesh = mesh;
 
-            int pointCount = laserSegmentEndIndeces[i] - laserSegmentStartIndeces[i] + 1;
-            Vector3[] verticies = new Vector3[pointCount + 1]; //Mesh verticies
+            int endIndex = laserSegmentEndIndices[i];
+            int startIndex = laserSegmentStartIndices[i];
+
+
+            int pointCount = endIndex - startIndex + 1;
+            Vector3[] verticies = new Vector3[pointCount];// + 1]; //Mesh verticies
 
 
             for (int j = 0; j < pointCount; ++j)
             {
-                int index = laserSegmentStartIndeces[i] + j;
+                int index = laserSegmentStartIndices[i] + j;
                 if (index == -1)
                 {
                     verticies[j] = transform.position;
@@ -513,65 +658,127 @@ public class SnakeController : MonoBehaviour
                 {
                     verticies[j] = Body[index].position;
                 }
-
             }
 
-            verticies[pointCount] = (verticies[pointCount - 1] + verticies[0]) / 2; //Middles of the line created by the two end points
 
-            int trianglesCount = (pointCount - 1) * 3;
-            int[] triangles = new int[trianglesCount];
-            for (int j = 0; j < pointCount - 1; ++j)
+
+
+            //Get mesh plane for 3D to 2D mapping
+            float[] planeEq = Tools.GetPlaneFrom3Points(verticies[0], verticies[verticies.Length - 2], verticies[verticies.Length - 1]);
+            Vector3 planeNormal = Tools.GetPlaneNormal(planeEq);
+
+            //Put all the vertices on the same plane
+            for (int j = 0; j < verticies.Length; ++j)
             {
-                int frontIndex = j * 3;
-                triangles[frontIndex] = j;
-                triangles[frontIndex + 1] = pointCount;
-                triangles[frontIndex + 2] = j + 1;
+                //verticies[j] += planeNormal * Tools.GetSignedDistancePointToPlane(verticies[j], planeEq);
+            } 
+            
+            //Map the points to a local 2D plane
+            Vector2[] mappedPoints = Tools.Map3Dto2D(verticies, planeNormal);
+
+            //Create polygon for triangulation
+            Polygon poly = new Polygon();
+            for (int j = 0; j < mappedPoints.Length; ++j)
+            {
+                poly.Add(new Vertex(mappedPoints[j].x, mappedPoints[j].y));
+            }
+
+            //Triangulate
+            ConstraintOptions options = new ConstraintOptions();
+            TriangleNet.Mesh tempMesh = (TriangleNet.Mesh)poly.Triangulate(options);
+
+            List<int> triangles = new List<int>();
+
+            //Iterate through triangulated mesh triangles
+            IEnumerator<Triangle> triangleEnumerator = tempMesh.triangles.GetEnumerator();
+
+            while (triangleEnumerator.MoveNext())
+            {
+                //Get the current triangle
+                Triangle current = triangleEnumerator.Current;
+
+                //Vertex indices
+                int v2Index = current.vertices[2].id;
+                int v1Index = current.vertices[1].id;
+                int v0Index = current.vertices[0].id;
+
+                //Add the triangles to the the laser mesh triangles list
+                triangles.Add(v2Index);
+                triangles.Add(v1Index);
+                triangles.Add(v0Index);
             }
 
 
 
             mesh.Clear();
             mesh.vertices = verticies;
-            mesh.triangles = triangles;
+            mesh.triangles = triangles.ToArray();
             mesh.RecalculateNormals();
-        }
-    }
 
-    public void Die()
-    {
-        dying = true;
-        dyingAnimtionTimeLeft = DyingAnimationLength;
-    }
-
-    void updateDieAnimation()
-    {
-        float timePerBodySegment = DyingAnimationLength / Body.Length;
-
-        int segmentDyingIndex = Body.Length - (int)(dyingAnimtionTimeLeft / timePerBodySegment);
-
-        if (segmentDyingIndex == 0)
-        {
-            Head.GetComponent<Renderer>().material.color = Color.red;
-        }
-        else
-        {
-            try
+            if (Owner != PhotonNetwork.LocalPlayer)
             {
-                Body[segmentDyingIndex - 1].GetComponent<Renderer>().material.color = Color.red;
-            } catch
-            {
-                Debug.Log(segmentDyingIndex - 1);
+                try
+                {
+                    laserMeshes[i].GetComponent<MeshCollider>().sharedMesh = mesh;
+                    laserMeshes[i].GetComponent<MeshCollider>().convex = true;
+                }
+                catch
+                {
+                    laserMeshes[i].GetComponent<MeshCollider>().convex = false;
+                }
             }
         }
-
-        dyingAnimtionTimeLeft -= Time.deltaTime * 1000;
-
-        if (dyingAnimtionTimeLeft <= 0)
-        {
-            Destroy(transform.gameObject);
-        }
-        
     }
+
+    public void Die(bool throwDeathEvent)
+    {
+        //Is true only when called by a SnakeBodyController, otherwise when called by the snake spawner event handler, it is false
+        if (throwDeathEvent)
+        {
+            SnakeSpawner.SnakeDied();
+        }
+
+        Dying = true;
+
+        Head.GetComponent<SnakeBodyController>().Die(0, SegmentDeathLingerTime);
+
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            Body[i].GetComponent<SnakeBodyController>().Die(SegmentDeathStartDelay * (i + 1), SegmentDeathLingerTime);
+        }
+
+        for (int i = 0; i < laserMeshes.Count; ++i)
+        {
+            laserMeshes[i].SetActive(false);
+        }
+    }
+
+    public void Hurt(Transform bodySegmentHurt)
+    {
+        int hurtStartIndex = Body.IndexOf(bodySegmentHurt);
+        SnakeSpawner.SnakeHurt(hurtStartIndex);
+        Hurt(hurtStartIndex);
+    }
+
+    public void Hurt(int hurtStartIndex)
+    {
+        float delayCount = 0;
+
+        int segmentsRemoved = CurrentLength - hurtStartIndex;
+
+        for (int i = 0; i < segmentsRemoved; ++i)
+        {
+            Body[hurtStartIndex].GetComponent<SnakeBodyController>().Die(SegmentDeathStartDelay * delayCount, SegmentDeathLingerTime);
+            removeSegment(hurtStartIndex);
+            delayCount++;
+        }
+
+        for (int i = 0; i < laserMeshes.Count; ++i)
+        {
+            laserMeshes[i].SetActive(false);
+        }
+    }
+
     #endregion  
 
     #region Movement functions
@@ -580,75 +787,75 @@ public class SnakeController : MonoBehaviour
         float vertical = Input.GetAxis("Vertical");
         float horizontal = Input.GetAxis("Horizontal");
 
-        //Generate rotation axis as vector based on input
         Vector3 inputVector = new Vector3(-vertical, horizontal, 0);
+
+        //Determine the axis of rotation for the transfrom based on input
         Vector3 rotationAxis = inputVector.normalized;
         
         float rotationSpeed = RotationSpeed * inputVector.magnitude * Time.deltaTime;
         
-        //Perform rotations
+        //Perform rotation
         Quaternion newRotation = Quaternion.AngleAxis(rotationSpeed, rotationAxis); //Rotate head
 
         //Update rotation data
         transform.rotation *= newRotation;
+        Head.rotation *= newRotation;
 
         //Move based on new rotation data
         Vector3 headMovement = transform.TransformDirection(Vector3.forward) * Speed * Time.deltaTime;
-        movementDistance = headMovement.magnitude;
         transform.position += headMovement;
+        Head.position += headMovement;
+
+    }
+
+    private void updateBodyTargets()
+    {
+        //Move all body segments to the target position
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            Body[i].position = targetBodyPositions[i];
+        }
+
+        //Update the target positions and rotations for the next unit of targetUpdateTime
+        targetBodyPositions[0] = Body[0].position + ((transform.position - Body[0].position).normalized * currentBodySize);
+        targetBodyRotations[0] = transform.rotation;
+        for (int i = 1; i < targetBodyPositions.Count; ++i)
+        {
+            targetBodyRotations[i] = Body[i - 1].rotation;
+            targetBodyPositions[i] = Body[i - 1].position;
+        }
+
+        //Set last positions and rotations to newly aquired positions
+        for (int i = 0; i < lastBodyPositions.Count; ++i)
+        {
+            lastBodyRotations[i] = Body[i].rotation;
+            lastBodyPositions[i] = Body[i].position;
+        }
+
+        //Update rotation axes
+        for (int i = 0; i < bodyRotationAxes.Count; ++i)
+        {
+            Quaternion baseRotation = targetBodyRotations[i] * Quaternion.Inverse(Body[i].rotation);
+            Vector3 rotationAxis;
+            baseRotation.ToAngleAxis(out float angle, out rotationAxis);
+            if (angle != 0)
+            {
+                bodyRotationAxes[i] = rotationAxis.normalized;
+            }
+        }
     }
 
     void moveBody()
     {
-
-
-        //Update new positions when moved the length of 1 body segment
-        if (updateMovementData) //If time to update target positions
-        {
-
-            //Move all body segments to the target position
-            for (int i = 0; i < Body.Length; ++i)
-            {
-                Body[i].position = targetBodyPositions[i];
-            }
-
-            //Update the target positions and rotations for the next unit of targetUpdateTime
-            targetBodyPositions[0] = Body[0].position + ((transform.position - Body[0].position).normalized * currentBodySize);
-            targetBodyRotations[0] = transform.rotation;
-            for (int i = 1; i < targetBodyPositions.Length; ++i)
-            {
-                targetBodyRotations[i] = Body[i - 1].rotation;
-                targetBodyPositions[i] = Body[i - 1].position;
-            }
-
-            //Set last positions and rotations to newly aquired positions
-            for (int i = 0; i < lastBodyPositions.Length; ++i)
-            {
-                lastBodyRotations[i] = Body[i].rotation;
-                lastBodyPositions[i] = Body[i].position;
-            }
-
-            //Update rotation axes
-            for (int i = 0; i < bodyRotationAxes.Length; ++i)
-            {
-                Quaternion baseRotation = targetBodyRotations[i] * Quaternion.Inverse(Body[i].rotation);
-                Vector3 rotationAxis;
-                baseRotation.ToAngleAxis(out float angle, out rotationAxis);
-                if (angle != 0)
-                {
-                    bodyRotationAxes[i] = rotationAxis.normalized;
-                }
-            }
-        }
-
-
-        float timeMovementRatio = timeSinceLastTargetPosUpdate / movementDataUpdateTime; //How far to lerp
+        float timeMovementRatio = timeSinceLastTargetPosUpdate / movementTargetUpdateRate; //How far to lerp
 
         //For all body segments, set position to proper vector lerped between position last update and target position based on percent
-        for (int i = 0; i < Body.Length; ++i)
+        for (int i = 0; i < Body.Count; ++i)
         {
-            Body[i].rotation = Quaternion.Lerp(lastBodyRotations[i], targetBodyRotations[i], timeMovementRatio);
-            Body[i].position = Vector3.Lerp(lastBodyPositions[i], targetBodyPositions[i], timeMovementRatio);
+            Vector3 pos = Vector3.Lerp(lastBodyPositions[i], targetBodyPositions[i], timeMovementRatio);
+            Quaternion rot = Quaternion.Lerp(lastBodyRotations[i], targetBodyRotations[i], timeMovementRatio);
+
+            Body[i].GetComponent<SnakeBodyController>().Move(pos, rot);
         }
     }
 
@@ -657,20 +864,18 @@ public class SnakeController : MonoBehaviour
     #region Initialization funtions
     void initializeHud()
     {
-        SnakeScoreText.text = "Score: 0";
-        SnakeLengthText.text = "Length: " + CurrentLength;
-    }
-
-    void initializePositionData()
-    {
-        transform.position = SpawnPoint;
+        //Only need the HUD for the local player score information
+        if (Owner == PhotonNetwork.LocalPlayer)
+        {
+            SnakeScoreText.text = "Score: " + Score;
+            SnakeLengthText.text = "Length: " + CurrentLength;
+        }
     }
 
     void generateHead()
     {
-        Head = Instantiate(SnakeHead).transform;
-        Head.SetParent(transform);
-        Head.GetComponent<SnakeHeadController>().Init(StartHeadSize);
+        Head = PhotonNetwork.Instantiate("SnakeHead", transform.position, Quaternion.identity).transform;
+        Head.GetComponent<SnakeBodyController>().Init(Owner, this, true);
         Head.GetComponent<Renderer>().material.color = currentSnakeColor;
     }
 
@@ -678,65 +883,73 @@ public class SnakeController : MonoBehaviour
     {
         CurrentLength = StartingLength;
 
+        //Offset position control
         float segmentSpawnOffset = (StartHeadSize / 2) + (StartBodySize / 2);
 
-        Body = new Transform[StartingLength];
+        Body = new List<Transform>();
+
+        //Generate a new game object for each body segment as many times as the 
         for (int i = 0; i < StartingLength; ++i)
         {
-            GameObject tempBodySeg = Instantiate(BodySegmentPrefab);
+            float tempSpawnOffset = segmentSpawnOffset + (StartBodySize * i);
+
+            GameObject tempBodySeg = PhotonNetwork.Instantiate("SnakeBodySeg", transform.position + (-Vector3.forward * tempSpawnOffset), Quaternion.identity);
             tempBodySeg.GetComponent<Renderer>().material = SnakeBodyMaterial;
             tempBodySeg.GetComponent<Renderer>().material.color = currentSnakeColor;
-            float tempSpawnOffset = segmentSpawnOffset + (StartBodySize * i);
-            tempBodySeg.transform.position = SpawnPoint + (-Vector3.forward * tempSpawnOffset);
-            tempBodySeg.transform.SetParent(transform);
+
+            tempBodySeg.GetComponent<SnakeBodyController>().Init(Owner, this, false);
             
-            Body[i] = tempBodySeg.transform; 
+            Body.Add(tempBodySeg.transform);
+
+            Score += PointsForNewSegment;
+            scoreLastGrow = Score;
         }
     }
 
     void initializeMovementData()
     {
+        //Update rate corresponds to the snake moving 1 body segment length in distance
+        //Body size is always 1 for now
+        movementTargetUpdateRate = 1 / Speed;
 
-        updateMovementData = false;
-
-        bodyRotationAxes = new Vector3[StartingLength];
-
-        for (int i = 0; i < StartingLength; ++i)
-        {
-            bodyRotationAxes[i] = Vector3.up;
-        }
-
-        //Init positional data for movement
-        targetBodyPositions = new Vector3[StartingLength];
-        targetBodyPositions[0] = Body[0].position + ((transform.position - Body[0].position).normalized * currentBodySize);
+        //Initialize body position control structure
+        targetBodyPositions = new List<Vector3>();
+        targetBodyPositions.Add(Body[0].position + ((transform.position - Body[0].position).normalized * currentBodySize));
         for (int i = 1; i < StartingLength; i++)
         {
-            targetBodyPositions[i] = Body[i - 1].position;
+            targetBodyPositions.Add(Body[i - 1].position);
         }
 
-        lastBodyPositions = new Vector3[StartingLength];
-        for (int i = 0; i < lastBodyPositions.Length; ++i)
+        lastBodyPositions = new List<Vector3>();
+        for (int i = 0; i < StartingLength; ++i)
         {
-            lastBodyPositions[i] = Body[i].position;
+            lastBodyPositions.Add(Body[i].position);
         }
 
-        //Init rotational data for movement
-        targetBodyRotations = new Quaternion[StartingLength];
-        targetBodyRotations[0] = transform.rotation;
-        for (int i = 1; i < Body.Length; ++i)
+        //Initialize body rotation control structure
+        bodyRotationAxes = new List<Vector3>();
+        for (int i = 0; i < StartingLength; ++i)
         {
-            targetBodyRotations[i] = Body[i - 1].rotation;
+            bodyRotationAxes.Add(Vector3.up);
         }
 
-        lastBodyRotations = new Quaternion[StartingLength];
-        for (int i = 0; i < Body.Length; ++i)
+        targetBodyRotations = new List<Quaternion>();
+        targetBodyRotations.Add(transform.rotation);
+        for (int i = 1; i < Body.Count; ++i)
         {
-            lastBodyRotations[i] = Body[i].rotation;
+            targetBodyRotations.Add(Body[i - 1].rotation);
+        }
+
+        lastBodyRotations = new List<Quaternion>();
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            lastBodyRotations.Add(Body[i].rotation);
         }
     }
 
     void initializeGameplayData()
     {
+        //Initialize size control structure
         currentHeadSize = StartHeadSize;
         currentBodySize = StartBodySize;
         scoreLastGrow = 0;
@@ -744,8 +957,28 @@ public class SnakeController : MonoBehaviour
 
     void initializeCameraData()
     {
-        Camera = GameObject.Find("Main Camera").transform;
-        Camera.GetComponent<CameraController>().SnakeObject = transform;
+        //Attach the main camera to this snake
+        if (Owner == PhotonNetwork.LocalPlayer)
+        {
+            Camera = GameObject.Find("Main Camera").transform;
+            Camera.GetComponent<CameraController>().SnakeObject = transform;
+        }
     }
     #endregion
+
+    void OnDestroy()
+    {
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            try
+            {
+                Destroy(Body[i].gameObject);
+            } catch { }
+        }
+
+        for (int i = 0; i < laserMeshes.Count; ++i)
+        {
+            Destroy(laserMeshes[i].gameObject);
+        }
+    }
 }

@@ -57,6 +57,7 @@ public static class Tools
         return newPoint;
     }
 
+
     //Returns plane equation (ax + by + cz + d = 0) like [a, b, c, d]
     public static float[] GetPlaneFrom3Points (Vector3 p1, Vector3 p2, Vector3 p3)
     {
@@ -107,10 +108,14 @@ public static class Tools
         return newPoints;
     }
 
+
+
     public static float Map(float value, float r1start, float r1end, float r2start, float r2end)
     {
         return (value - r1start) / (r1end - r1start) * (r2end - r2start) + r2start;
     }
+
+
 
     public static bool LinesIntersect2D(Vector2 l1Start, Vector2 l1End, Vector2 l2Start, Vector2 l2End) 
     {
@@ -167,12 +172,7 @@ public static class Tools
         return false;*/
     }
 
-    public static float GetPointDistanceFromPlane(Vector3 point, Vector3 planeNormal, Vector3 pointOnPlane)
-    {
-        Vector3 n = planeNormal.normalized;
-        Vector3 v = point - pointOnPlane;
-        return Vector3.Dot(v, n);
-    }
+
 
     public static float GetAngleAtVertex(Vector3 p1, Vector3 vertex, Vector3 p2, out Vector3 rAxis)
     {
