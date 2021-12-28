@@ -34,56 +34,24 @@ MonoBehaviour:
   RunInBackground: 1
   StartInOfflineMode: 0
   RpcList:
+  - addNewFood
+  - AddPlayerToScoreList
+  - addSegment
   - ClickRpc
+  - destroyFood
   - DestroyRpc
   - DestroySpaceship
   - Fire
-  - RespawnSpaceship
-  - LoadFood
-  - StageDataRequest
-  - StageDataResponse
-  - RequestPlayerPhotonView
-  - RequestStageData
-  - GetStageDataResponse
-  - UpdateSnakeData
-  - RequestSnakeData
-  - GetSnakeDataResponse
-  - RequestUpdatedSnakeData
-  - EveryoneFoodEaten
-  - MasterFoodEaten
-  - RequestSnakeColorData
-  - GetSnakeColorResponse
-  - LeaveGame
-  - AddPlayerToScoreList
   - GetScoreResponse
-  - RequestScore
-  - LoadStageData
-  - SetInput
-  - setInput
-  - setPlayerToSyncWith
-  - syncPlayerWithOwner
-  - requestOwnerSync
-  - setOwner
-  - requestTotalSyncWithOwner
-  - syncNewSpawn
-  - affirmSync
+  - InformMasterFoodEaten
+  - LeaveGame
+  - loadFood
+  - RespawnSpaceship
+  - respondToClientWithFoodData
   - syncOurselvesWithOwner
   - syncWithPlayer
-  - growClientFromOwner
   - updateClientLaserMeshesFromOwner
-  - newFoodGenerated
-  - EveryoneFoodGeneratedFromSnakeEaten
-  - MasterFoodGeneratedFromSnakeEaten
-  - newFoodGeneratedFromSnake
-  - DestroyFood
-  - InformMasterFoodEaten
-  - SpawnNewFood
-  - addNewFood
-  - respondToClientWithFoodData
-  - destroyFood
-  - loadFood
-  - BodySegmentDied
-  - addSegment
+  - getScoreResponse
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1

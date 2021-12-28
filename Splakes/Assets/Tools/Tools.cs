@@ -11,6 +11,7 @@ public static class Tools
         z
     }
 
+    #region Bounding Box Functions
     //Returns array length 2 where [0] is low bound and [1] is high bounds
     public static Vector3[] GetBounds(Vector3[] points)
     {
@@ -48,6 +49,43 @@ public static class Tools
         return new Vector3[] { lowBounds, highBounds };
     }
 
+    public static Vector2[] GetBounds(Vector2[] points)
+    {
+        Vector2 highBounds = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+        Vector2 lowBounds = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+
+        for (int i = 0; i < points.Length; ++i)
+        {
+            if (points[i].x < lowBounds.x)
+            {
+                lowBounds.x = points[i].x;
+            }
+            if (points[i].y < lowBounds.y)
+            {
+                lowBounds.y = points[i].y;
+            }
+            if (points[i].x > highBounds.x)
+            {
+                highBounds.x = points[i].x;
+            }
+            if (points[i].y > highBounds.y)
+            {
+                highBounds.y = points[i].y;
+            }
+        }
+
+        return new Vector2[] { lowBounds, highBounds };
+    }
+
+    public static bool BoundingBoxCollision(Vector3[] bb1, Vector3[] bb2)
+    {
+        return ((bb1[0].x <= bb2[1].x && bb1[1].x >= bb2[0].x) &&
+                (bb1[0].y <= bb2[1].y && bb1[1].y >= bb2[0].y) &&
+                (bb1[0].z <= bb2[1].z && bb1[1].z >= bb2[0].z));
+    }
+    #endregion
+
+
     public static Vector3 RotateAroundPivot(Vector3 point, Vector3 pivot, Vector3 eulerAngles)
     {
         Vector3 direction = point - pivot;
@@ -57,7 +95,7 @@ public static class Tools
         return newPoint;
     }
 
-
+    #region Plane functions
     //Returns plane equation (ax + by + cz + d = 0) like [a, b, c, d]
     public static float[] GetPlaneFrom3Points (Vector3 p1, Vector3 p2, Vector3 p3)
     {
@@ -107,6 +145,29 @@ public static class Tools
 
         return newPoints;
     }
+    #endregion
+
+    #region Triangle functions
+    public static bool PointInTriangle(Vector3 point, Vector3 tp1, Vector3 tp2, Vector3 tp3)
+    {
+        Vector3 v0 = tp3 - tp1;
+        Vector3 v1 = tp2 - tp1;
+        Vector3 v2 = point - tp1;
+
+        float dot00 = Vector3.Dot(v0, v0);
+        float dot01 = Vector3.Dot(v0, v1);
+        float dot02 = Vector3.Dot(v0, v2);
+        float dot11 = Vector3.Dot(v1, v1);
+        float dot12 = Vector3.Dot(v1, v2);
+
+        float invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+        float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+        float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+        return (u >= 0) && (v >= 0) && (u + v < 1);
+    }
+    #endregion
+
 
 
 

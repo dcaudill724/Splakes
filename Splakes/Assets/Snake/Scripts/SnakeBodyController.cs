@@ -50,7 +50,7 @@ public class SnakeBodyController : MonoBehaviour
                             3
                         };
 
-                        EasyEventSystem.RaiseEvent("BodySegDied", eventContent);
+                        EasyEventSystem.RaiseLocalEvent("body segment died", eventContent);
                     }
                 }
             }
@@ -119,12 +119,27 @@ public class SnakeBodyController : MonoBehaviour
         }
     }
 
+    public void LaserWallCollision()
+    {
+        if (!Dying)
+        {
+            if (IsHead)
+            {
+                snakeDie();
+            }
+            else
+            {
+                snakeHurt();
+            }
+        }
+    }
+
     //Calls Hurt() on the snake object. Only the owner of the snake can cause it do get hurt, for synchronization purposes
     private void snakeHurt()
     {
         if (owner == PhotonNetwork.LocalPlayer)
         {
-            parent.Hurt(transform);
+            parent.LocalHurt(transform);
         }
     }
 
@@ -133,7 +148,7 @@ public class SnakeBodyController : MonoBehaviour
     {
         if (owner == PhotonNetwork.LocalPlayer)
         {
-            parent.Die(true);
+            parent.LocalStartDying();
         }
     }
 

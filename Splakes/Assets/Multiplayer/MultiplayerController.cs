@@ -8,18 +8,24 @@ using UnityEngine.SceneManagement;
 
 public class MultiplayerController : MonoBehaviourPunCallbacks
 {
+    public bool OfflineMode;
+
     public TextMeshProUGUI DebugLog;
     public RoomListContentController RoomListContent;
 
     [HideInInspector]
     public string RoomToJoin; //Is set when a room is selected from the list of rooms UI element
     
-
     string gameVersion = "1";
 
     #region Game Startup Connection
     void Awake()
     {
+        if (OfflineMode)
+        {
+            PhotonNetwork.OfflineMode = true;
+        }
+
         if (!PhotonNetwork.IsConnected)
         {
             PhotonNetwork.AutomaticallySyncScene = true; //So when a guest client joins the room it loads GameScene
@@ -29,7 +35,7 @@ public class MultiplayerController : MonoBehaviourPunCallbacks
     void Start()
     {
         //Connect to the Photon server
-        if (!PhotonNetwork.IsConnected)
+        if (!PhotonNetwork.IsConnected && !OfflineMode)
         {
             LogMessage("Connecting");
             PhotonNetwork.GameVersion = gameVersion;
@@ -62,6 +68,7 @@ public class MultiplayerController : MonoBehaviourPunCallbacks
     //Create a room based on the name of the room given from the room name input field
     public void CreateRoom(TextMeshProUGUI roomNameInput)
     {
+       
         //Set Room options
         RoomOptions ro = new RoomOptions();
         ro.MaxPlayers = 16;
@@ -74,15 +81,13 @@ public class MultiplayerController : MonoBehaviourPunCallbacks
     {
         base.OnCreatedRoom();
         LogMessage("Created room succesfully");
-
-        //When a player creates a room they will want to be spawned into the GameScene immediately
-        SceneManager.LoadScene("GameScene");
-        
+        Debug.Log("Created room succesfully");
     }
 
     public override void OnCreateRoomFailed(short returnCode, string message)
     {
         LogMessage("Create room failed: " + returnCode + " : " + message);
+        Debug.Log("Create room failed: " + returnCode + " : " + message);
     }
 
     
@@ -101,6 +106,11 @@ public class MultiplayerController : MonoBehaviourPunCallbacks
         base.OnJoinedRoom();
         LogMessage("Joined room " + PhotonNetwork.CurrentRoom);
         Debug.Log("Joined room");
+        if (PhotonNetwork.LocalPlayer == PhotonNetwork.MasterClient)
+        {
+            LogMessage("Loading level");
+            PhotonNetwork.LoadLevel("GameScene");
+        }
     }
 
     private void LogMessage(string message)

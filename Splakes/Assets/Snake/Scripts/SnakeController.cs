@@ -6,32 +6,19 @@ using Photon.Pun;
 using Photon.Realtime;
 using ExitGames.Client.Photon;
 using System;
-using TriangleNet.Geometry;
-using TriangleNet.Meshing;
-using TriangleNet.Topology;
-using TriangleNet;
 
 public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCallback
 {
     #region Generation data
-
-    //Generation parameters
     public int StartingLength;
-    public float StartHeadSize;
-    public float StartBodySize;
     #endregion
 
     #region Visual data
-    public Material SnakeBodyMaterial;
-    public Material LaserWallMaterial;
+    public Material SnakeBodyBaseMaterial;
+    private Material sharedSnakeBodyMaterial;
+
     public Color[] SnakeColors;
     private Color currentSnakeColor;
-    public Color[] LaserWallColors;
-    private Color currentLaserWallColor;
-
-
-    public TextMeshProUGUI SnakeScoreText;
-    public TextMeshProUGUI SnakeLengthText;
     #endregion
 
     #region Body data
@@ -45,10 +32,8 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
     [HideInInspector]
     public int CurrentLength;
 
-    //Laser wall data
-    private List<int> laserSegmentStartIndices;
-    private List<int> laserSegmentEndIndices;
-    private List<GameObject> laserMeshes;
+    //Laser wall
+    private LaserWallController laserWallController;
     #endregion
 
     #region Movement data
@@ -88,82 +73,58 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
     private float currentHeadSize;
     private float currentBodySize;
 
+    //Death data
     public float SegmentDeathStartDelay = 0.25f;
     public float SegmentDeathLingerTime = 1f;
 
     [HideInInspector]
     public bool Dying = false;
 
-    [HideInInspector]
-    public SpawnSnakes SnakeSpawner;
-    public GenerateFood FoodSpawner;
+    //Bounds of snake
+    private Vector3[] bounds;
     #endregion
 
     #region Multiplayer Data
-    //Owner data
     public Player Owner;
     #endregion
-
-    private GameObject[] midpointSpheres;
 
     // Start is called before the first frame update
     void Start()
     {
-        midpointSpheres = new GameObject[20];
-        for (int i = 0; i < 20; ++i)
-        {
-            midpointSpheres[i] = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            midpointSpheres[i].transform.localScale = new Vector3(0.3f, 0.3f, 0.3f);
-        }
-
-        //Get the food spawner
-        FoodSpawner = GameObject.Find("FoodGenerator").GetComponent<GenerateFood>();
-
-        //Initialize laser wall lists
-        laserMeshes = new List<GameObject>();
-        laserSegmentStartIndices = new List<int>();
-        laserSegmentEndIndices = new List<int>();
-
         //Randomly select snake color
         currentSnakeColor = SnakeColors[UnityEngine.Random.Range(0, SnakeColors.Length)];
-        currentLaserWallColor = LaserWallColors[UnityEngine.Random.Range(0, LaserWallColors.Length)];
 
-        //Instantiate the body objects and body control structures
+        //Local player instantiates their own snake
         if (PhotonNetwork.LocalPlayer == Owner)
         {
             generateHead();
             generateBody();
             initializeGameplayData();
             initializeMovementData();
-            initializeHud();
             initializeCameraData();
+
+            laserWallController = GetComponent<LaserWallController>();
+            laserWallController.Init(ref Body, true);
         }
+
+        //Snakes owned by other players request the other player for synchronization
         else
         {
             RequestSyncWithOwner();
         }
+
+        
     }
 
     // Update is called once per frame
     void Update()
     {
-        bool updateTargets = false;
-
-        //We dont want to update any targets if we are dying
+        //Only update movement when not dying
         if (!Dying)
         {
-            //Update loop to run once the snake has moved the distance equivilent to the size of 1 body segment
-            timeSinceLastTargetPosUpdate += Time.deltaTime;
-            if (timeSinceLastTargetPosUpdate >= 1 / Speed) //If time to update target positions
-            {
-                timeSinceLastTargetPosUpdate -= movementTargetUpdateRate;
-
-                updateTargets = true;
-            }
-
             if (Owner == PhotonNetwork.LocalPlayer)
             {
-                ownerUpdate(updateTargets);
+                ownerUpdate(checkTargetUpdate());
             }
             else
             {
@@ -174,53 +135,64 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
         {
             if (Owner == PhotonNetwork.LocalPlayer)
             {
-                bool doneDying = true;
-
-                if (Head != null)
+                if (checkDoneDying())
                 {
-                    doneDying = false;
-                }
-
-                for (int i = 0; i < Body.Count; ++i)
-                {
-                    if (Body[i] != null)
-                    {
-                        doneDying = false;
-                    }
-                }
-
-                if (doneDying)
-                {
-                    SnakeSpawner.RespawnSnake();
+                    EasyEventSystem.RaiseLocalEvent("snake finished dying");
                 }
             }
         }
     }
 
+    private bool checkTargetUpdate()
+    {
+        timeSinceLastTargetPosUpdate += Time.deltaTime;
+        if (timeSinceLastTargetPosUpdate >= 1 / Speed) //If time to update target positions
+        {
+            timeSinceLastTargetPosUpdate -= movementTargetUpdateRate;
 
+            return true;
+        }
+
+        return false;
+    }
 
     private void ownerUpdate(bool updateTargets)
     {
         if (updateTargets)
         {
             updateBodyTargets();
-            UpdateLaserWalls(); //Only owner finds new laser walls
             updateOtherClientsLaserMeshes(); //Send new laser wall data to other clients
         }
-
         moveHead();
         moveBody();
-        generateLaserMeshes();
+        updateBounds();
     }
 
     private void nonOwnerUpdate()
     {
-        if (Body.Count > 0)
-        {
-            generateLaserMeshes();
-        }
+        updateBounds();
     }
+   
+    private bool checkDoneDying()
+    {
+        bool doneDying = true;
 
+        if (Head != null)
+        {
+            doneDying = false;
+        }
+
+        for (int i = 0; i < Body.Count; ++i)
+        {
+            if (Body[i] != null)
+            {
+                doneDying = false;
+            }
+        }
+
+        return doneDying;
+    }
+    
     #region Multiplayer functions
     public void OnPhotonInstantiate(PhotonMessageInfo info)
     {
@@ -229,10 +201,10 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
         //Add all snakes not instantiated by the local client to the SnakeSpawner list of snakes
         if (Owner != PhotonNetwork.LocalPlayer)
         {
-            SnakeSpawner = GameObject.Find("SnakeSpawner").GetComponent<SpawnSnakes>();
-            SnakeSpawner.AddSnake(this);
+            EasyEventSystem.RaiseLocalEvent("unowned snake instantiated", this);
         }
     }
+
 
 
     //Synchronization functions
@@ -254,7 +226,6 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
         {
             syncList[i + 3] = Body[i].GetComponent<PhotonView>().ViewID;
         }
-
 
         photonView.RPC("syncOurselvesWithOwner", info.Sender, (object)syncList);
     }
@@ -279,20 +250,25 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
             
             syncSnakeColors((Vector3)syncListArray[0], (Vector3)syncListArray[1]);
         }
+
+        laserWallController = GetComponent<LaserWallController>();
+        laserWallController.Init(ref Body, false);
     }
 
     void syncSnakeColors(Vector3 bodyColor, Vector3 laserColor)
     {
         currentSnakeColor = new Color(bodyColor.x, bodyColor.y, bodyColor.z);
 
-        Head.GetComponent<Renderer>().material.color = currentSnakeColor;
+        sharedSnakeBodyMaterial = new Material(SnakeBodyBaseMaterial);
+        sharedSnakeBodyMaterial.color = currentSnakeColor;
+
+        Head.GetComponent<Renderer>().sharedMaterial = sharedSnakeBodyMaterial;
         for (int i = 0; i < Body.Count; ++i)
         {
-            Body[i].GetComponent<Renderer>().material.color = currentSnakeColor;
+            Body[i].GetComponent<Renderer>().sharedMaterial = sharedSnakeBodyMaterial;
         }
 
-
-        currentLaserWallColor = new Color(laserColor.x, laserColor.y, laserColor.z);
+        //currentLaserWallColor = new Color(laserColor.x, laserColor.y, laserColor.z);
     }
 
 
@@ -305,32 +281,21 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
 
     private Vector3 getSnakeLaserColor()
     {
-        return new Vector3(currentLaserWallColor.r, currentLaserWallColor.g, currentLaserWallColor.b);
+        return Vector3.zero;//(currentLaserWallColor.r, currentLaserWallColor.g, currentLaserWallColor.b);
     }
+
 
 
     //Owner to client realtime synchronization functions
     private void updateOtherClientsLaserMeshes()
     {
-        object laserMeshSyncList = new object[]
-        {
-            laserSegmentStartIndices.ToArray(),
-            laserSegmentEndIndices.ToArray()
-        };
-
-        photonView.RPC("updateClientLaserMeshesFromOwner", RpcTarget.Others, laserMeshSyncList);
+        photonView.RPC("updateClientLaserMeshesFromOwner", RpcTarget.Others, laserWallController.GetIndicesForSync());
     }
 
     [PunRPC]
     private void updateClientLaserMeshesFromOwner(object laserMeshSyncList)
     {
-        object[] objArray = (object[])laserMeshSyncList;
-
-        laserSegmentStartIndices = new List<int>();
-        laserSegmentStartIndices.AddRange((int[])objArray[0]);
-
-        laserSegmentEndIndices = new List<int>();
-        laserSegmentEndIndices.AddRange((int[])objArray[1]);
+        GetComponent<LaserWallController>().SetIndicesForSync(laserMeshSyncList);
     }
     #endregion
 
@@ -339,19 +304,9 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
     {
         Score += points;
         updateSize();
-        updateHUD();
     }
 
-    private void updateHUD()
-    {
-        if (Owner == PhotonNetwork.LocalPlayer)
-        {
-            SnakeScoreText.text = "Score: " + Score;
-            SnakeLengthText.text = "Length: " + CurrentLength;
-        }
-    }
-
-
+    
     private void updateSize()
     {
         //Add new segment if condition is met
@@ -368,7 +323,7 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
     {
         //Initialize new segment
         Transform newSegment = PhotonNetwork.Instantiate("SnakeBodySeg", Body[CurrentLength - 1].position + Body[CurrentLength - 1].TransformDirection(-Vector3.forward) * currentBodySize, Quaternion.identity).transform;
-        newSegment.GetComponent<Renderer>().material.color = currentSnakeColor;
+        newSegment.GetComponent<Renderer>().sharedMaterial = sharedSnakeBodyMaterial;
         newSegment.GetComponent<SnakeBodyController>().Init(Owner, this, true);
 
         //Resize all arrays and and new segment data
@@ -385,11 +340,13 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
         photonView.RPC("addSegment", RpcTarget.Others, newSegment.GetComponent<PhotonView>().ViewID);
     }
 
+
+
     [PunRPC]
     private void addSegment(int newSegViewID)
     {
         Transform newSegment = PhotonView.Find(newSegViewID).transform;
-        newSegment.GetComponent<Renderer>().material.color = currentSnakeColor;
+        newSegment.GetComponent<Renderer>().sharedMaterial = sharedSnakeBodyMaterial;
         newSegment.GetComponent<SnakeBodyController>().Init(Owner, this, true);
         Body.Add(newSegment);
         CurrentLength += 1;
@@ -412,332 +369,61 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
         Score -= PointsForNewSegment;
     }
 
-    private void UpdateLaserWalls()
+
+
+    public Vector3[] GetBounds()
     {
-        laserSegmentStartIndices = new List<int>(); //Holds the Body index of laser segment start
-        laserSegmentEndIndices = new List<int>(); //Holds the Body index of laser segment end
-
-        int startIndex = -1; //start at head which is basically Body[-1]
-        bool firstLaserSegmentValid = false;
-        bool endOfFirstSegmentIsTail = false;
-        int firstLaserSegEndIndex = findLaserSegment(startIndex, out firstLaserSegmentValid, out endOfFirstSegmentIsTail);
-
-        if (firstLaserSegmentValid) //If a valid first segment is even found
-        {
-            laserSegmentStartIndices.Add(startIndex); //Add the start index
-            laserSegmentEndIndices.Add(firstLaserSegEndIndex); //Add the end index
-
-            if (!endOfFirstSegmentIsTail) //If we havent already reached the tail we will need to find more
-            {
-                bool endOfSegmentIsTail = false;
-                bool currentSegmentIsValid = false;
-               
-                int currentStartIndex = startIndex + 1;
-                int lastSegmentEndIndex = firstLaserSegEndIndex;
-
-                bool searchingInLastSegment = true;
-                int bestSegmentLength = 0;
-                int bestSegmentStartIndex = 0;
-                int bestSegmentEndIndex = 0;
-
-                while (!endOfSegmentIsTail)
-                {
-                    int currentEndIndex = findLaserSegment(currentStartIndex, out currentSegmentIsValid, out endOfSegmentIsTail);
-
-                    if (currentSegmentIsValid)
-                    {
-                        if (searchingInLastSegment)
-                        {
-                            if (currentStartIndex == lastSegmentEndIndex)
-                            {
-                                if (bestSegmentEndIndex > lastSegmentEndIndex)
-                                {
-                                    laserSegmentStartIndices.Add(bestSegmentStartIndex); //Add the start index
-                                    laserSegmentEndIndices.Add(bestSegmentEndIndex); //Add the end index
-                                    lastSegmentEndIndex = bestSegmentEndIndex;
-                                    bestSegmentEndIndex = 0;
-                                    bestSegmentLength = 0;
-                                    bestSegmentStartIndex = 0;
-                                }
-                                
-                                searchingInLastSegment = false;
-                            }
-                            else
-                            {
-                                int currentSegmentLength = Mathf.Abs(currentEndIndex - currentStartIndex);
-
-                                if (currentSegmentLength > bestSegmentLength)
-                                {
-                                    bestSegmentLength = currentSegmentLength;
-                                    bestSegmentStartIndex = currentStartIndex;
-                                    bestSegmentEndIndex = currentEndIndex;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (currentEndIndex > lastSegmentEndIndex)
-                            {
-                                laserSegmentStartIndices.Add(currentStartIndex); //Add the start index
-                                laserSegmentEndIndices.Add(currentEndIndex); //Add the end index
-                                lastSegmentEndIndex = currentEndIndex;
-                                searchingInLastSegment = true;
-                            }
-                        }
-                    }
-
-                    currentStartIndex++;
-                }
-
-            }
-        }
-
-
-
-
+        return bounds;
     }
+
     
-    int findLaserSegment(int startIndex, out bool laserSegmentValid, out bool endOfSegmentIsTail)
+
+    private void updateBounds()
     {
-        laserSegmentValid = false;
-        endOfSegmentIsTail = false;
-        bool searchingForFirstSegment = true;
-        while (searchingForFirstSegment) //Find the first laser segment by searching start to end
+        Vector3[] points = new Vector3[Body.Count + 1];
+        points[0] = transform.position;
+        for (int i = 0; i < Body.Count; ++i)
         {
-            int laserSegEndIndex = findLaserSegEndIndex(startIndex); //Find laser segment from starting point
-
-            if (Mathf.Abs(laserSegEndIndex - startIndex) < 3) //If too small to form a plane the segment is invalid
-            {
-                startIndex++;
-            }
-            else
-            {
-                laserSegmentValid = true; //Is a valid segment
-                return laserSegEndIndex;
-            }
-
-            if (laserSegEndIndex == Body.Count - 1)
-            {
-                searchingForFirstSegment = false; //Done searching
-                endOfSegmentIsTail = true; //The end of of the segment is the tail
-
-            }
+            points[i + 1] = Body[i].position;
         }
 
-        return -1;
+        Vector3[] tempBounds = Tools.GetBounds(points);
+
+        Vector3 tempMinBounds = tempBounds[0] + (tempBounds[0] - tempBounds[1]).normalized * 1.5f;
+        Vector3 tempMaxBounds = tempBounds[1] + (tempBounds[1] - tempBounds[0]).normalized * 1.5f;
+
+        bounds = new Vector3[] { tempMinBounds, tempMaxBounds };
     }
 
-    int findLaserSegEndIndex(int segStartIndex)
+    public void CheckBBCollision(SnakeController otherSnake)
     {
-        //If we reached the tail of the snake, make that the final laser segment
-        //All the setup is assuming there at least 3 points in the curve as you need at least 3 points to make a 2d plane
-
-        //Initialization
-        Transform segStart;
-        if (segStartIndex == -1)
+        try
         {
-            segStart = transform;
-        }
-        else
-        {
-            segStart = Body[segStartIndex];
-        }
-
-        int segIndex = segStartIndex + 1;
-        bool foundPlane = false;
-        int pointAtPlaneEndIndex = Body.Count - 1;
-        float[] planeEquation = Tools.GetPlaneFrom3Points(segStart.position, Body[segIndex].position, Body[pointAtPlaneEndIndex].position);
-
-        do
-        {
-            if (pointAtPlaneEndIndex - segStartIndex + 1 != 3)
+            if (Tools.BoundingBoxCollision(bounds, otherSnake.GetBounds()))
             {
-                //Check all points inbetween 3rd point of segment being tested, and the end point
-                bool allPointsPassed = true;
-                for (int i = segStartIndex + 2; i < pointAtPlaneEndIndex; ++i)
-                {
-                    Vector3 pointToTest = Body[i].position;
-                    if (Tools.GetDistancePointToPlane(pointToTest, planeEquation) > 0.3)
-                    {
-                        allPointsPassed = false; //Point is not part of the plane
-                        i = pointAtPlaneEndIndex;//To break the loop
-                    }
-                }
-
-                if (allPointsPassed)
-                {
-                    foundPlane = true;
-                }
-            }
-            else
-            {
-                foundPlane = true;
-            }
-
-            pointAtPlaneEndIndex--;
-            planeEquation = Tools.GetPlaneFrom3Points(segStart.position, Body[segIndex].position, Body[pointAtPlaneEndIndex].position);
-        } while (!foundPlane);
-        pointAtPlaneEndIndex += 1;//Add 1 to account for the last decrement in the do-while loop
-
-
-       for (int i = pointAtPlaneEndIndex; i >= segIndex; --i)
-        {
-            RaycastHit hit;
-            if (Physics.Raycast(segStart.position, Body[i].position - segStart.position, out hit, 1000, LayerMask.GetMask("RaycastTargetLayer"))){
-                
-                
-                if (Body.IndexOf(hit.collider.transform.parent) == i)
-                {
-                    return i;
-                }
+                otherSnake.CheckLaserWallCollision(this);
             }
         }
-        return segIndex;
+        catch { }
     }
 
-    void generateLaserMeshes()
+    public void CheckLaserWallCollision(SnakeController otherSnake)
     {
-        //Only add or remove laser meshes when the number of meshes change
-        int laserMeshesSegmentsDifference = laserMeshes.Count - laserSegmentStartIndices.Count;
-        if (laserMeshesSegmentsDifference > 0) //If we have more meshes than lasers
-        {
-            for (int i = 0; i < laserMeshesSegmentsDifference; ++i)
-            {
-                Destroy(laserMeshes[0]);
-                laserMeshes.RemoveAt(0);
-            }
-        }
-
-        else if (laserMeshesSegmentsDifference < 0) //if we have more lasers than meshes
-        {
-            for (int i = 0; i < -laserMeshesSegmentsDifference; ++i)
-            {
-                GameObject laserMesh = new GameObject("laser mesh");
-                laserMesh.layer = 11;   
-                laserMesh.AddComponent<MeshFilter>();
-                laserMesh.AddComponent<MeshRenderer>();
-                laserMesh.AddComponent<LaserWallController>();
-
-                laserMesh.GetComponent<MeshRenderer>().material = LaserWallMaterial;
-                laserMesh.GetComponent<Renderer>().material.SetColor("_AlbedoColor", currentLaserWallColor);
-
-                if (Owner != PhotonNetwork.LocalPlayer)
-                {
-                    laserMesh.AddComponent<MeshCollider>();
-                }
-
-                laserMeshes.Add(laserMesh);
-            }
-
-        }
-
-
-        for (int i = 0; i < laserMeshes.Count; ++i)
-        {
-            laserMeshes[i].SetActive(true);
-
-            UnityEngine.Mesh mesh = new UnityEngine.Mesh();
-            laserMeshes[i].GetComponent<MeshFilter>().mesh = mesh;
-
-            int endIndex = laserSegmentEndIndices[i];
-            int startIndex = laserSegmentStartIndices[i];
-
-
-            int pointCount = endIndex - startIndex + 1;
-            Vector3[] verticies = new Vector3[pointCount];// + 1]; //Mesh verticies
-
-
-            for (int j = 0; j < pointCount; ++j)
-            {
-                int index = laserSegmentStartIndices[i] + j;
-                if (index == -1)
-                {
-                    verticies[j] = transform.position;
-                }
-                else
-                {
-                    verticies[j] = Body[index].position;
-                }
-            }
-
-
-
-
-            //Get mesh plane for 3D to 2D mapping
-            float[] planeEq = Tools.GetPlaneFrom3Points(verticies[0], verticies[verticies.Length - 2], verticies[verticies.Length - 1]);
-            Vector3 planeNormal = Tools.GetPlaneNormal(planeEq);
-
-            //Put all the vertices on the same plane
-            for (int j = 0; j < verticies.Length; ++j)
-            {
-                //verticies[j] += planeNormal * Tools.GetSignedDistancePointToPlane(verticies[j], planeEq);
-            } 
-            
-            //Map the points to a local 2D plane
-            Vector2[] mappedPoints = Tools.Map3Dto2D(verticies, planeNormal);
-
-            //Create polygon for triangulation
-            Polygon poly = new Polygon();
-            for (int j = 0; j < mappedPoints.Length; ++j)
-            {
-                poly.Add(new Vertex(mappedPoints[j].x, mappedPoints[j].y));
-            }
-
-            //Triangulate
-            ConstraintOptions options = new ConstraintOptions();
-            TriangleNet.Mesh tempMesh = (TriangleNet.Mesh)poly.Triangulate(options);
-
-            List<int> triangles = new List<int>();
-
-            //Iterate through triangulated mesh triangles
-            IEnumerator<Triangle> triangleEnumerator = tempMesh.triangles.GetEnumerator();
-
-            while (triangleEnumerator.MoveNext())
-            {
-                //Get the current triangle
-                Triangle current = triangleEnumerator.Current;
-
-                //Vertex indices
-                int v2Index = current.vertices[2].id;
-                int v1Index = current.vertices[1].id;
-                int v0Index = current.vertices[0].id;
-
-                //Add the triangles to the the laser mesh triangles list
-                triangles.Add(v2Index);
-                triangles.Add(v1Index);
-                triangles.Add(v0Index);
-            }
-
-
-
-            mesh.Clear();
-            mesh.vertices = verticies;
-            mesh.triangles = triangles.ToArray();
-            mesh.RecalculateNormals();
-
-            if (Owner != PhotonNetwork.LocalPlayer)
-            {
-                try
-                {
-                    laserMeshes[i].GetComponent<MeshCollider>().sharedMesh = mesh;
-                    laserMeshes[i].GetComponent<MeshCollider>().convex = true;
-                }
-                catch
-                {
-                    laserMeshes[i].GetComponent<MeshCollider>().convex = false;
-                }
-            }
-        }
+        laserWallController.CheckCollision(otherSnake);
     }
 
-    public void Die(bool throwDeathEvent)
-    {
-        //Is true only when called by a SnakeBodyController, otherwise when called by the snake spawner event handler, it is false
-        if (throwDeathEvent)
-        {
-            SnakeSpawner.SnakeDied();
-        }
 
+
+   
+
+    public void LocalStartDying()
+    {
+        EasyEventSystem.RaiseNetworkEvent(SnakeEvents.SnakeStartedDying);
+        StartDying();
+    }
+
+    public void StartDying()
+    {
         Dying = true;
 
         Head.GetComponent<SnakeBodyController>().Die(0, SegmentDeathLingerTime);
@@ -747,16 +433,14 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
             Body[i].GetComponent<SnakeBodyController>().Die(SegmentDeathStartDelay * (i + 1), SegmentDeathLingerTime);
         }
 
-        for (int i = 0; i < laserMeshes.Count; ++i)
-        {
-            laserMeshes[i].SetActive(false);
-        }
+        laserWallController.IsActive = false;
     }
 
-    public void Hurt(Transform bodySegmentHurt)
+    public void LocalHurt(Transform bodySegmentHurt)
     {
         int hurtStartIndex = Body.IndexOf(bodySegmentHurt);
-        SnakeSpawner.SnakeHurt(hurtStartIndex);
+
+        EasyEventSystem.RaiseNetworkEvent(SnakeEvents.SnakeHurt, hurtStartIndex);
         Hurt(hurtStartIndex);
     }
 
@@ -772,11 +456,6 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
             removeSegment(hurtStartIndex);
             delayCount++;
         }
-
-        for (int i = 0; i < laserMeshes.Count; ++i)
-        {
-            laserMeshes[i].SetActive(false);
-        }
     }
 
     #endregion  
@@ -788,6 +467,10 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
         float horizontal = Input.GetAxis("Horizontal");
 
         Vector3 inputVector = new Vector3(-vertical, horizontal, 0);
+        if (PhotonNetwork.LocalPlayer != PhotonNetwork.MasterClient)
+        {
+            inputVector = new Vector3(-1, 0, 0);
+        }
 
         //Determine the axis of rotation for the transfrom based on input
         Vector3 rotationAxis = inputVector.normalized;
@@ -862,16 +545,6 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
     #endregion
 
     #region Initialization funtions
-    void initializeHud()
-    {
-        //Only need the HUD for the local player score information
-        if (Owner == PhotonNetwork.LocalPlayer)
-        {
-            SnakeScoreText.text = "Score: " + Score;
-            SnakeLengthText.text = "Length: " + CurrentLength;
-        }
-    }
-
     void generateHead()
     {
         Head = PhotonNetwork.Instantiate("SnakeHead", transform.position, Quaternion.identity).transform;
@@ -882,20 +555,24 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
     void generateBody()
     {
         CurrentLength = StartingLength;
+        currentBodySize = 1;
+        currentHeadSize = 1.5f;
 
         //Offset position control
-        float segmentSpawnOffset = (StartHeadSize / 2) + (StartBodySize / 2);
+        float segmentSpawnOffset = (1.5f / 2f) + (1f / 2f);
 
         Body = new List<Transform>();
+
+        sharedSnakeBodyMaterial = new Material(SnakeBodyBaseMaterial);
+        sharedSnakeBodyMaterial.color = currentSnakeColor;
 
         //Generate a new game object for each body segment as many times as the 
         for (int i = 0; i < StartingLength; ++i)
         {
-            float tempSpawnOffset = segmentSpawnOffset + (StartBodySize * i);
+            float tempSpawnOffset = segmentSpawnOffset + i;
 
             GameObject tempBodySeg = PhotonNetwork.Instantiate("SnakeBodySeg", transform.position + (-Vector3.forward * tempSpawnOffset), Quaternion.identity);
-            tempBodySeg.GetComponent<Renderer>().material = SnakeBodyMaterial;
-            tempBodySeg.GetComponent<Renderer>().material.color = currentSnakeColor;
+            tempBodySeg.GetComponent<Renderer>().sharedMaterial = sharedSnakeBodyMaterial;
 
             tempBodySeg.GetComponent<SnakeBodyController>().Init(Owner, this, false);
             
@@ -949,9 +626,6 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
 
     void initializeGameplayData()
     {
-        //Initialize size control structure
-        currentHeadSize = StartHeadSize;
-        currentBodySize = StartBodySize;
         scoreLastGrow = 0;
     }
 
@@ -975,10 +649,7 @@ public class SnakeController : MonoBehaviourPunCallbacks, IPunInstantiateMagicCa
                 Destroy(Body[i].gameObject);
             } catch { }
         }
-
-        for (int i = 0; i < laserMeshes.Count; ++i)
-        {
-            Destroy(laserMeshes[i].gameObject);
-        }
+        Destroy(laserWallController);
+        Destroy(sharedSnakeBodyMaterial);
     }
 }

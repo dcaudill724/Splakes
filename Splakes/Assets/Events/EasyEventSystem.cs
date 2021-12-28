@@ -1,7 +1,18 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Photon.Realtime;
+using Photon.Pun;
+using ExitGames.Client.Photon;
 
+public enum SnakeEvents : byte
+{
+    NeedSync = 1,
+    SnakeStartedDying = 2,
+    SnakeHurt = 3,
+    SnakeRespawn = 4,
+    SnakeSegmentDied = 5,
+}
 
 public interface EventReceiver
 {
@@ -14,7 +25,6 @@ public static class EasyEventSystem
 
     static EasyEventSystem()
     {
-        Debug.Log("Events system");
         eventReceivers = new List<EventReceiver>();
     }
 
@@ -23,11 +33,21 @@ public static class EasyEventSystem
         eventReceivers.Add(receiver);
     }
 
-    public static void RaiseEvent(string eventName, object content)
+    public static void RaiseLocalEvent(string eventName, object content = null)
     {
         foreach (EventReceiver er in eventReceivers)
         {
             er.ReceiveEvent(eventName, content);
         }
+    }
+
+    public static void RaiseNetworkEvent(SnakeEvents snakeEvent, object eventContent = null, RaiseEventOptions reo = null)
+    {
+        if (reo == null) 
+        {
+            reo = new RaiseEventOptions();
+        }
+
+        PhotonNetwork.RaiseEvent((byte)snakeEvent, eventContent, reo, SendOptions.SendReliable);
     }
 }

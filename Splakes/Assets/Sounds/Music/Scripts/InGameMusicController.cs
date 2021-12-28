@@ -13,7 +13,7 @@ public class InGameMusicController : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        startNewSong();
+        //startNewSong();
     }
 
     // Update is called once per frame

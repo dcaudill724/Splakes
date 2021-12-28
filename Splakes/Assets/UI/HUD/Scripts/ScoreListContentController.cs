@@ -37,13 +37,15 @@ public class ScoreListContentController : MonoBehaviour
 
     public void UpdatePlayer(Player player, int score)
     {
-        if (!playerScoreListItems.ContainsKey(player))
+        //If player exists already, update it, otherwise add the new player
+        if (playerScoreListItems.ContainsKey(player))
+        {
+            playerScoreListItems[player].transform.Find("PlayerScore").GetComponent<TextMeshProUGUI>().text = score.ToString();
+        }
+        else
         {
             AddExistingPlayer(player, score);
-            return;
         }
-
-        playerScoreListItems[player].transform.Find("PlayerScore").GetComponent<TextMeshProUGUI>().text = score.ToString();
     }
 
     public void RemovePlayer(Player player)

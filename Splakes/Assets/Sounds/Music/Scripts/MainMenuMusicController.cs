@@ -11,14 +11,19 @@ public class MainMenuMusicController : MonoBehaviour
     void Start()
     {
         var temp = GetComponent<AudioSource>();
-        temp.clip = Music;
-        temp.Play();
+        //temp.clip = Music;
+        //temp.Play();
     }
 
     // Update is called once per frame
     void Update()
     {
 
+    }
+
+    private void OnDestroy()
+    {
+        
     }
 }
 

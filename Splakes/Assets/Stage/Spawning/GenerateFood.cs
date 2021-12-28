@@ -25,6 +25,7 @@ public class GenerateFood : MonoBehaviourPun, EventReceiver
     //Visual data
     public Color[] FoodColors = new Color[0];
     public Vector2Int PointValueRange = new Vector2Int(2, 10);
+
     public Vector2 SizeRange = new Vector2(0.5f, 1.3f);
     public Vector2Int EmissionRateRange = new Vector2Int(2, 10);
 
@@ -34,15 +35,32 @@ public class GenerateFood : MonoBehaviourPun, EventReceiver
     //Prefabs
     public GameObject FoodPrefab;
     public GameObject FoodBitPrefab;
+
+    private Material[] foodColorMaterials;
+    private Material[] foodbitColorMaterials;
     
 
     void Start()
     {
+        Debug.Log("made it here");
+
         //Add to easy event system
         EasyEventSystem.AddReceiver(this);
 
         //Storage initialization
         foodList = new List<GameObject>();
+
+        foodColorMaterials = new Material[FoodColors.Length];
+        foodbitColorMaterials = new Material[FoodColors.Length];
+
+        for (int i = 0; i < FoodColors.Length; ++i)
+        {
+            foodColorMaterials[i] = new Material(FoodPrefab.GetComponent<Renderer>().sharedMaterial);
+            foodColorMaterials[i].color = FoodColors[i];
+
+            foodbitColorMaterials[i] = new Material(FoodBitPrefab.GetComponent<Renderer>().sharedMaterial);
+            foodbitColorMaterials[i].color = FoodColors[i];
+        }
 
         //Initialize a parent object to all food objects for cleanliness and audio functions
         foodContainer = new GameObject("Food Container");
@@ -65,7 +83,7 @@ public class GenerateFood : MonoBehaviourPun, EventReceiver
     {
         switch (eventName)
         {
-            case "BodySegDied":
+            case "body segment died":
                 object[] conArray = (object[])content;
 
                 if (PhotonNetwork.LocalPlayer == PhotonNetwork.MasterClient)
@@ -109,7 +127,9 @@ public class GenerateFood : MonoBehaviourPun, EventReceiver
         fc.ParticleEmissionRate = tempEmissionRate;
 
         //Set random color
-        fc.FoodColor = FoodColors[Random.Range(0, FoodColors.Length)];
+        int randColorIndex = Random.Range(0, FoodColors.Length);
+        fc.SharedFoodBitMaterial = foodbitColorMaterials[randColorIndex];
+        food.GetComponent<Renderer>().sharedMaterial = foodColorMaterials[randColorIndex];
 
         //Add food object to the container
         food.transform.SetParent(foodContainer.transform);
@@ -315,5 +335,14 @@ public class GenerateFood : MonoBehaviourPun, EventReceiver
         }
 
         return null;
+    }
+
+    void OnDestroy()
+    {
+        for (int i = 0; i < FoodColors.Length; ++i)
+        {
+            Destroy(foodColorMaterials[i]);
+            Destroy(foodbitColorMaterials[i]);
+        }
     }
 }

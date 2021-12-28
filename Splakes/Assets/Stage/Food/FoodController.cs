@@ -16,6 +16,7 @@ public class FoodController : MonoBehaviour
 
     //Prefabs
     public GameObject FoodBitPrefab;
+    public Material SharedFoodBitMaterial;
 
     //Means of spawning data
     public bool SpawnedFromSnake;
@@ -25,21 +26,15 @@ public class FoodController : MonoBehaviour
 
     //Food object data
     public int PointValue;
-    public Color FoodColor;
     public float ParticleEmissionRate;
 
     // Start is called before the first frame update
     void Start()
     {
-        transform.GetComponent<Renderer>().material.color = FoodColor;
-
         ParticleSystem.EmissionModule em = GetComponent<ParticleSystem>().emission;
         em.rateOverTime = ParticleEmissionRate;
-       
-        transform.GetComponent<ParticleSystemRenderer>().material.SetColor("_Color", FoodColor);
 
-        transform.GetChild(0).GetComponent<Light>().color = FoodColor;
-
+        transform.GetComponent<ParticleSystemRenderer>().sharedMaterial = SharedFoodBitMaterial;
     }
 
     void Update()
@@ -106,7 +101,7 @@ public class FoodController : MonoBehaviour
             foodBit.transform.position = transform.position + spawnPoint;
             foodBit.GetComponent<FoodBitController>().HeadTransform = headTransform;
             foodBit.GetComponent<FoodBitController>().SpawnExplosionDirection = spawnPoint.normalized;
-            foodBit.GetComponent<Renderer>().material.SetColor("_Color", FoodColor);
+            foodBit.GetComponent<Renderer>().sharedMaterial = SharedFoodBitMaterial;
         }
 
         FoodGenerator.EatFood(ID);

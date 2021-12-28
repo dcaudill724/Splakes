@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 7287961400918231008}
   - component: {fileID: 4776273952023580335}
   - component: {fileID: 3578485738507506760}
+  - component: {fileID: 6104258717544416541}
   m_Layer: 0
   m_Name: Snake
   m_TagString: Snake
@@ -45,25 +46,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d62625a60a0932a4dbb978a957b22a78, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  StartingLength: 5
-  StartHeadSize: 1.5
-  StartBodySize: 1
-  SnakeBodyMaterial: {fileID: 2100000, guid: 2ba9d149df21aa14f8fd9b65dd42a546, type: 2}
-  LaserWallMaterial: {fileID: 2100000, guid: 27b11ee01cb3d4647a0230f0e464fea1, type: 2}
+  StartingLength: 20
+  SnakeBodyBaseMaterial: {fileID: 2100000, guid: 2ba9d149df21aa14f8fd9b65dd42a546,
+    type: 2}
   SnakeColors:
   - {r: 0.49411765, g: 0.18039216, b: 0.5176471, a: 1}
   - {r: 0.654902, g: 0.7921569, b: 0.69411767, a: 1}
   - {r: 0.9137255, g: 0.44705883, b: 0.29803923, a: 1}
   - {r: 0.18039216, g: 0.5254902, b: 0.67058825, a: 1}
   - {r: 0.99607843, g: 0.91764706, b: 0.98039216, a: 1}
-  LaserWallColors:
-  - {r: 0.80784315, g: 0.96862745, b: 0.627451, a: 1}
-  - {r: 0.96862745, g: 0.5568628, b: 0.4117647, a: 1}
-  - {r: 0.35686275, g: 0.37254903, b: 0.5921569, a: 1}
-  - {r: 0.3372549, g: 0.93333334, b: 0.95686275, a: 1}
-  - {r: 0.92941177, g: 0.12941177, b: 0.4862745, a: 1}
-  SnakeScoreText: {fileID: 0}
-  SnakeLengthText: {fileID: 0}
   Head: {fileID: 0}
   Body: []
   CurrentLength: 0
@@ -76,8 +67,6 @@ MonoBehaviour:
   SegmentDeathStartDelay: 0.05
   SegmentDeathLingerTime: 0.1
   Dying: 0
-  SnakeSpawner: {fileID: 0}
-  FoodSpawner: {fileID: 0}
 --- !u!114 &4776273952023580335
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -134,3 +123,26 @@ MonoBehaviour:
     InterpolateOption: 0
     InterpolateMoveTowardsSpeed: 1
     InterpolateLerpSpeed: 0
+--- !u!114 &6104258717544416541
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7291576856246377368}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0b856d71c557da84d8b558901ed9b50d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  LaserWallColors:
+  - {r: 0.8627451, g: 0.93333334, b: 0.81960785, a: 1}
+  - {r: 0.5372549, g: 0.007843138, b: 0.24313726, a: 1}
+  - {r: 1, g: 0.6509804, b: 0.61960787, a: 1}
+  - {r: 0.08627451, g: 0.59607846, b: 0.4509804, a: 1}
+  - {r: 0.42352942, g: 0.83137256, b: 1, a: 1}
+  CurrentLaserWallColor: {r: 0, g: 0, b: 0, a: 0}
+  LaserWallBaseMaterial: {fileID: 2100000, guid: 27b11ee01cb3d4647a0230f0e464fea1,
+    type: 2}
+  UpdatesPerSecond: 5
+  IsActive: 0

@@ -4,16 +4,22 @@ using UnityEngine;
 using Photon.Realtime;
 using Photon.Pun;
 using UnityEngine.SceneManagement;
+using ExitGames.Client.Photon;
+using System;
 
-public class MatchMultiplayerController : MonoBehaviourPunCallbacks
+public class MatchMultiplayerController : MonoBehaviourPunCallbacks, IOnEventCallback, EventReceiver
 {
     //Debug logging
     public DebugLog DebugLog;
 
     //Hud
-    public ScoreListContentController ScoreListContent;
+    public HudController HUD;
+    
+    //Snake sync control objects
+    private SnakeController snake;
+    private Dictionary<Player, SnakeController> otherSnakes;
 
-    //Level control objects
+    //Spawning objects
     public GenerateFood FoodGenerator;
     public SpawnSnakes SnakeSpawner;
 
@@ -23,12 +29,9 @@ public class MatchMultiplayerController : MonoBehaviourPunCallbacks
 
     void Start()
     {
-        
-        for (int i = 0; i < PhotonNetwork.PlayerList.Length; ++i)
-        {
-            ScoreListContent.AddNewPlayer(PhotonNetwork.PlayerList[i]); //Add players in the game to the score list
-        }
-        
+        EasyEventSystem.AddReceiver(this);
+
+        initSnakeSync();
     }
 
     void Update()
@@ -40,76 +43,187 @@ public class MatchMultiplayerController : MonoBehaviourPunCallbacks
 
             //Put timed update requests in this region
             //################################
-            RequestScores();
+
+            updateScore();
+
             //################################
 
             timeSinceLastUpdate -= updateTime;
         }
+
+        //Check collision for all other snakes with our snake
+        foreach (KeyValuePair<Player, SnakeController> entry in otherSnakes)
+        {
+            snake.CheckBBCollision(entry.Value);
+        }
     }
 
-   
-    
-    
+    #region Snakes
+    //Initializes snake sync control objects
+    private void initSnakeSync()
+    {
+        snake = SnakeSpawner.SpawnSnake(); //Spawns the snake controlled by the local player
+        otherSnakes = new Dictionary<Player, SnakeController>(); //Initializes the list of snakes controlled by other players
+        syncOtherSnakesWithOwners(); //Sync snakes owned by other players with data from the owners
+    }
+
+    //Sync all snakes instantiated by other players with their local data
+    private void syncOtherSnakesWithOwners()
+    {
+        GameObject[] allSnakes = GameObject.FindGameObjectsWithTag("Snake");
+
+        for (int i = 0; i < allSnakes.Length; ++i)
+        {
+            SnakeController sc = allSnakes[i].GetComponent<SnakeController>();
+
+            if (sc != snake)
+            {
+                otherSnakes.Add(sc.Owner, sc);
+                sc.RequestSyncWithOwner();
+            }
+        }
+    }
+
+
+
+    //Spawns a new snake for local player if they die
+    private void respawnSnake()
+    {
+        PhotonNetwork.Destroy(snake.gameObject);
+        snake = SnakeSpawner.SpawnSnake();
+    }
+
+
+
+    //Add and remove snakes
+    private void addSnake(SnakeController sc)
+    {
+        //Update the snake controller if the owner already has an element in the list, otherwise add the snake controller with the new owner
+        if (otherSnakes.ContainsKey(sc.Owner))
+        {
+            otherSnakes[sc.Owner] = sc;
+        }
+        else
+        {
+            otherSnakes.Add(sc.Owner, sc);
+        }
+    }
+
+    private void removeSnakeFromOthers(Player player)
+    {
+        otherSnakes.Remove(player);
+    }
+    #endregion
+
+    #region HUD
     //Request the other players scores
-    public void RequestScores()
+    private void updateScore()
     {
-        photonView.RPC("GetScoreResponse", RpcTarget.All, SnakeSpawner.GetScore());
-    }
-
-    //Adds a new player to the score list
-    [PunRPC]
-    public void AddPlayerToScoreList(int score, PhotonMessageInfo info)
-    {
-        ScoreListContent.AddExistingPlayer(info.Sender, score);
+        photonView.RPC("getScoreResponse", RpcTarget.All, snake.Score);
     }
 
     //Update the senders score in the score list
     [PunRPC]
-    public void GetScoreResponse(int score, PhotonMessageInfo info)
+    private void getScoreResponse(int score, PhotonMessageInfo info)
     {
-        ScoreListContent.UpdatePlayer(info.Sender, score);
+        if (info.Sender == PhotonNetwork.LocalPlayer)
+        {
+            HUD.UpdatePlayer(info.Sender, score, true, snake.CurrentLength);
+        }
+        else
+        {
+            HUD.UpdatePlayer(info.Sender, score);
+        }
     }
 
+    private void removePlayerFromScoreList(Player player)
+    {
+        HUD.RemovePlayer(player);
+    }
+    #endregion
+
+    #region Disconnection
     //Leave the game and return to the main menu
     [PunRPC]
-    public void LeaveGame()
+    public void LeaveGame(bool disconnect = false)
     {
-        checkMasterClose();
-        PhotonNetwork.LeaveRoom();
-        SceneManager.LoadScene("MainMenu");
-    }
-
-    private void OnApplicationQuit()
-    {
-        checkMasterClose();
-        PhotonNetwork.Disconnect();
-    }
-
-    //Only runs if the master client leaves the game
-    void checkMasterClose()
-    {
+        //When the Master leaves, the room closes and all other players are kicked from the game
         if (PhotonNetwork.IsMasterClient)
         {
-            PhotonNetwork.CurrentRoom.IsVisible = false; //If master leaves the room is no longer
-            photonView.RPC("LeaveGame", RpcTarget.Others); //Make all other players leave the game
+            PhotonNetwork.CurrentRoom.IsVisible = false;
+            photonView.RPC("LeaveGame", RpcTarget.Others, false); 
         }
+
+        if (disconnect)
+        {
+            PhotonNetwork.Disconnect();
+        }
+        else
+        {
+            PhotonNetwork.LeaveRoom();
+        }
+        
+        SceneManager.LoadScene("MainMenu");
+    }
+    #endregion
+
+    #region Built-in event methods
+    private void OnApplicationQuit()
+    {
+        Debug.Log("Quit");
+        LeaveGame(true);
     }
 
     public override void OnPlayerLeftRoom(Player otherPlayer)
     {
         base.OnPlayerLeftRoom(otherPlayer);
 
-        ScoreListContent.RemovePlayer(otherPlayer); //Remove the player from the score list
+        removePlayerFromScoreList(otherPlayer);
+        removeSnakeFromOthers(otherPlayer); //Remove the players snake from otherSnakes
     }
-    
+
     public override void OnPlayerEnteredRoom(Player newPlayer)
     {
         base.OnPlayerEnteredRoom(newPlayer);
-
-        DebugLog.ShowMessage("Loading Stage data");
-        
-
-        ScoreListContent.AddNewPlayer(newPlayer); //Add new player to the score list
     }
-    
+    #endregion
+
+    #region Event handlers
+
+    //Network event handler
+    public void OnEvent(EventData photonEvent)
+    {
+        SnakeEvents snakeEvent;
+        Enum.TryParse(Enum.GetName(typeof(SnakeEvents), photonEvent.Code), out snakeEvent);
+
+        Player sender = PhotonNetwork.CurrentRoom.GetPlayer(photonEvent.Sender);
+
+        switch ((SnakeEvents)photonEvent.Code)
+        {
+            case SnakeEvents.SnakeStartedDying: //Informs the client that the event sender has died
+                otherSnakes[sender].StartDying();
+                break;
+
+            case SnakeEvents.SnakeHurt: //Informs the client that the event sender has been hurt and what body segment was hurt.
+                otherSnakes[sender].Hurt((int)photonEvent.CustomData);
+                break;
+        }
+    }
+
+    //Local Event handler
+    public void ReceiveEvent(string eventName, object content)
+    {
+        switch (eventName)
+        {
+            case "unowned snake instantiated":
+                addSnake((SnakeController)content);
+                break;
+
+            case "snake finished dying":
+                respawnSnake();
+                break;
+        }
+    }
+
+    #endregion
 }
